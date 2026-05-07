@@ -1,0 +1,65 @@
+# プロジェクト概要
+Discord VC用ポモドーロタイマーbot。
+作業時間/休憩時間/最終休憩のセットを自動進行し、Embedで状況表示。
+最終休憩終了後にVC全員強制退出してbot終了。
+
+詳細仕様は @docs/spec.md を参照。
+個別仕様: @docs/embed-spec.md, @docs/audio-spec.md, @docs/ending-spec.md
+ユーザーストーリー: @docs/backlog.md
+
+## アーキテクチャ
+- apps/bot/: Discord bot + WebSocketサーバー
+  (Node.js 20 + TypeScript + discord.js v14 + @discordjs/voice)
+- apps/web/: ローカルWebコントロールパネル
+  (Vite + React + TypeScript)
+- packages/shared/: 型定義とWSスキーマ (zod)
+- 通信: localhost WebSocket (ws://localhost:8787)
+- タイマーの正本はbot側プロセスのメモリ
+
+## 開発ルール (厳守)
+- TypeScript strict mode、any禁止
+  (やむを得ない場合 unknown + 型ガード)
+- pnpm使用、npm/yarn禁止
+- 環境変数は zod でバリデーション
+- ロギングは pino、console.log禁止
+- Conventional Commits (feat:/fix:/chore:/docs:/test:)
+- 1機能 = 1ブランチ = 1 PR、main直push禁止
+- 新規ライブラリ追加は事前提案して承認を得る
+
+## IMPORTANT: 必須技術仕様
+- タイマーは setInterval ではなく Date.now() ベース差分計算
+- Embed投稿は MessageFlags.SuppressNotifications を必ず付ける
+  (例外は終了時の「お疲れさまでした」メッセージのみ)
+- DISCORD_TOKEN を絶対にコミットしない (.env + .gitignore)
+- 詳細は @docs/embed-spec.md を参照
+
+## 開発環境
+- OS: Linux
+- Node.js: 20.x (nvm)
+- パッケージマネージャ: pnpm
+- フォーマッタ: Prettier、リンタ: ESLint flat config
+- テスト: Vitest
+
+## Linux固有の注意
+- @discordjs/voice が sodium を要する場合 libsodium-dev が必要
+- 音声再生に ffmpeg が必要
+- パスは / 区切り
+
+## Definition of Done
+- TypeScript コンパイルエラーゼロ
+- ESLint エラーゼロ
+- 関連 Vitest テスト pass
+- 動作確認手順を PR description に記載
+- 仕様変更時は該当 docs/ も更新
+
+## やってほしくないこと
+- discord.js v13以前のAPI使用
+- 承認なしの新規ライブラリ追加
+- README以外のドキュメント量産
+- main直push、--no-verify でのフック迂回
+- 「動いた」だけで完了報告 (DoD全項目を確認)
+- Discord配信API (Go Live相当) を試みる
+- SuppressNotificationsフラグの付け忘れ
+- 音源ファイルのライセンス未確認のまま使用
+- 音源ファイルをコミットせず .gitignore する
+  (リポジトリだけで動作するように同梱必須)
