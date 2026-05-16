@@ -1,7 +1,6 @@
 # 音声通知仕様
 
 ## 概要
-
 VC参加中のbotから音声ファイルを再生して通知する。
 通知音はすべてSE(短い効果音)で、人間音声・言語は使わない。
 
@@ -50,32 +49,40 @@ VC参加中のbotから音声ファイルを再生して通知する。
 - libsodium-wrappers または tweetnacl (音声暗号化)
 
 ### Linux固有のセットアップ
-```bash
-# Ubuntu/Debian
+```
+# Ubuntu Server
 sudo apt install libsodium-dev ffmpeg
-# Arch
-sudo pacman -S libsodium ffmpeg
 ```
 
-## AudioPlayer クラス設計指針
+## SoundPlayer クラス設計指針
 
-```typescript
+```
 class SoundPlayer {
-  private player: AudioPlayer;
-  private connection: VoiceConnection | null;
+  - player : AudioPlayer
+  - connection : VoiceConnection | null
 
-  init(connection: VoiceConnection): void
+  + init(connection)             // bot入室時に呼ぶ
 
   // フェーズ切替系
-  async playWorkEnd(): Promise
-  async playBreakEnd(): Promise
-  async playFinalStart(): Promise
+  + playWorkEnd()
+  + playBreakEnd()
+  + playFinalStart()
 
   // 終了演出系
-  async playCountdownWarning(): Promise
-  async playFinish(): Promise
+  + playCountdownWarning()
+  + playFinish()
 
-  // 内部: 共通再生
-  private async play(filename: string): Promise
+  // 終了処理
+  + stop()                       // 再生中止 + リスナークリア
+
+  // 内部
+  - play(filename)               // 共通再生処理
 }
 ```
+
+## エラーハンドリング
+
+- 音源ファイルが見つからない → pinoでログ、その回スキップ
+- 再生エラー → pinoでログ、次の音源で再開
+- 連続失敗した音源は SessionState.failedAudioFiles に記録
+  (デバッグ用、セッション終了時にクリア)
