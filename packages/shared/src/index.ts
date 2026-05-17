@@ -1,4 +1,4 @@
-// US-2 で zod スキーマ (TimerConfig / TimerPhase / TimerSnapshot /
-// BotConfig / SessionState) をここに実装する。
-// 現時点はワークスペースのビルド確認用のプレースホルダ。
-export {};
+// US-2: 共有型・スキーマ定義 (docs/spec.md)。
+export * from './timer.js';
+export * from './config.js';
+export * from './session.js';

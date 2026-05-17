@@ -18,5 +18,8 @@
     "build": "tsc -b",
     "typecheck": "tsc -b",
     "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "zod": "^3"
   }
 }
