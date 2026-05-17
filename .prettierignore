@@ -1,0 +1,6 @@
+dist
+node_modules
+pnpm-lock.yaml
+
+# 設計ドキュメントはユーザー管理。コードフォーマッタの対象にしない
+docs

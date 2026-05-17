@@ -1,0 +1,17 @@
+# 依存・ビルド成果物
+node_modules/
+dist/
+*.tsbuildinfo
+
+# ログ
+*.log
+
+# 環境変数 (DISCORD_TOKEN 等。絶対にコミットしない)
+.env
+!.env.example
+
+# ランタイム生成設定 (/pomo init で生成される)
+apps/bot/config.json
+
+# 音源ファイルはリポジトリに含める (US-14 で配置)
+!apps/bot/assets/sounds/*.mp3

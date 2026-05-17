@@ -1,24 +1,33 @@
 # プロジェクト概要
 Discord VC用ポモドーロタイマーbot。
-作業時間/休憩時間/最終休憩のセットを自動進行し、Embedで状況表示。
-最終休憩終了後にVC全員強制退出してbot終了。
+Raspberry Pi 5 (Ubuntu Server) 上で24時間常時稼働する。
+Discord内のEmbedボタンとモーダルだけで操作できる。
+人間ユーザーのVC入退室に連動してbotも自動入退室する。
 
-詳細仕様は @docs/spec.md を参照。
-個別仕様: @docs/embed-spec.md, @docs/audio-spec.md, @docs/ending-spec.md
+詳細仕様: @docs/spec.md
+個別仕様: @docs/embed-spec.md, @docs/commands-spec.md,
+        @docs/voice-spec.md, @docs/audio-spec.md, @docs/ending-spec.md
+デプロイ: @docs/deployment.md
 ユーザーストーリー: @docs/backlog.md
 
 ## アーキテクチャ
-- apps/bot/: Discord bot + WebSocketサーバー
-  (Node.js 20 + TypeScript + discord.js v14 + @discordjs/voice)
-- apps/web/: ローカルWebコントロールパネル
-  (Vite + React + TypeScript)
-- packages/shared/: 型定義とWSスキーマ (zod)
-- 通信: localhost WebSocket (ws://localhost:8787)
-- タイマーの正本はbot側プロセスのメモリ
+- apps/bot/: Discord bot (Node.js 20 + TypeScript + discord.js v14 + @discordjs/voice)
+- packages/shared/: 型定義とスキーマ (zod)
+
+シングルプロセスの常駐型bot。WebアプリやWebSocketは持たない。
+操作インターフェースは Discord の Slash Command (/pomo init のみ)、
+Message Components (ボタン)、Modal (設定入力) のみ。
+
+## 動作モデル (要約)
+- Pi起動 → systemd が bot 起動 → 設定検証 → 待機状態
+- ユーザーVC入室 → bot自動入室
+- 開始ボタン → タイマー実行 → 終了処理 → 新Embed投稿 → 待機
+- 人間ゼロ1分継続 → bot自動退出 (タイマー中なら停止 + 終了処理経由)
+
+タイマー終了時に process.exit() しない。Pi稼働中ずっと生き続ける。
 
 ## 開発ルール (厳守)
 - TypeScript strict mode、any禁止
-  (やむを得ない場合 unknown + 型ガード)
 - pnpm使用、npm/yarn禁止
 - 環境変数は zod でバリデーション
 - ロギングは pino、console.log禁止
@@ -31,19 +40,24 @@ Discord VC用ポモドーロタイマーbot。
 - Embed投稿は MessageFlags.SuppressNotifications を必ず付ける
   (例外は終了時の「お疲れさまでした」メッセージのみ)
 - DISCORD_TOKEN を絶対にコミットしない (.env + .gitignore)
-- 詳細は @docs/embed-spec.md を参照
+- タイマー終了時に process.exit() しない (常駐維持)
+- bot のVC接続管理は人間ユーザー数連動 (@docs/voice-spec.md)
+- 詳細仕様への参照: @docs/embed-spec.md, @docs/commands-spec.md
 
 ## 開発環境
-- OS: Linux
+- 開発マシン: Linux
+- 本番稼働マシン: Raspberry Pi 5 (8GB) + Ubuntu Server 64-bit
 - Node.js: 20.x (nvm)
 - パッケージマネージャ: pnpm
 - フォーマッタ: Prettier、リンタ: ESLint flat config
 - テスト: Vitest
 
-## Linux固有の注意
-- @discordjs/voice が sodium を要する場合 libsodium-dev が必要
-- 音声再生に ffmpeg が必要
-- パスは / 区切り
+## Raspberry Pi固有の注意
+- ARM64対応バイナリのライブラリを使う
+- @discordjs/voice は libsodium と ffmpeg が必要
+  (sudo apt install libsodium-dev ffmpeg)
+- 音源ファイル(assets/sounds/)はリポジトリに含める
+- 詳細は @docs/deployment.md
 
 ## Definition of Done
 - TypeScript コンパイルエラーゼロ
@@ -60,6 +74,19 @@ Discord VC用ポモドーロタイマーbot。
 - 「動いた」だけで完了報告 (DoD全項目を確認)
 - Discord配信API (Go Live相当) を試みる
 - SuppressNotificationsフラグの付け忘れ
+- タイマー終了時の process.exit (常駐を壊す)
+- bot のVC接続をタイマー連動で管理する
+  (人間ユーザー数連動が正しい設計)
 - 音源ファイルのライセンス未確認のまま使用
 - 音源ファイルをコミットせず .gitignore する
-  (リポジトリだけで動作するように同梱必須)
+
+## セキュリティ
+- DISCORD_TOKEN は .env で管理、絶対に Git にコミットしない
+  (.env.example は空のテンプレートとして配置)
+- bot招待時の権限は最小化:
+  View Channels, Send Messages, Manage Messages,
+  Connect, Speak, Move Members, Embed Links のみ
+  Administrator 権限は絶対に付与しない
+- メッセージ内容を解釈・実行する処理は実装しない
+- /pomo init はロールベースで実行権限を制御
+  (詳細は @docs/commands-spec.md)
