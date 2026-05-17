@@ -5,13 +5,19 @@
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
-    "dev": "node --watch ./dist/index.js",
+    "dev": "node --watch --env-file=.env ./dist/index.js",
     "build": "tsc -b",
     "typecheck": "tsc -b",
-    "start": "node ./dist/index.js",
+    "start": "node --env-file=.env ./dist/index.js",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@co-working-call/shared": "workspace:*"
+    "@co-working-call/shared": "workspace:*",
+    "discord.js": "^14",
+    "pino": "^9",
+    "zod": "^3"
+  },
+  "devDependencies": {
+    "pino-pretty": "^13"
   }
 }
