@@ -63,8 +63,8 @@ sudo apt install -y libsodium-dev ffmpeg
 ### 1. リポジトリのクローン
 ```
 cd ~
-git clone https://github.com/<your-account>/discord-pomodoro-bot.git
-cd discord-pomodoro-bot
+git clone https://github.com/<your-account>/co-workingCall-bot.git
+cd co-workingCall-bot
 pnpm install
 ```
 
@@ -109,7 +109,7 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/discord-pomodoro-bot/apps/bot
+WorkingDirectory=%h/co-workingCall-bot/apps/bot
 ExecStart=%h/.nvm/versions/node/v20/bin/pnpm start
 Restart=on-failure
 RestartSec=10
@@ -161,7 +161,7 @@ systemctl --user restart pomodoro-bot.service
 
 ### コード更新
 ```
-cd ~/discord-pomodoro-bot
+cd ~/co-workingCall-bot
 git pull
 pnpm install
 systemctl --user restart pomodoro-bot.service
