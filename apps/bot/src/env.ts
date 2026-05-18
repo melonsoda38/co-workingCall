@@ -1,22 +1,35 @@
 import { z } from 'zod';
+import { validate } from './config/validate.js';
+
+/** 空文字・空白のみは「未設定」とみなし undefined に変換する。 */
+const emptyToUndefined = (v: unknown): unknown =>
+  typeof v === 'string' && v.trim() === '' ? undefined : v;
 
 /**
  * 環境変数スキーマ (.env)。spec.md L108-111 準拠。
- * US-4 では最小限。US-5 で config.json 検証と統合・拡張する。
+ * 値が空のキー (例: .env.example をコピーしただけの CONFIG_PATH=) は
+ * 未設定扱いにして既定値を適用する (US-4 のバグ修正)。
  */
 export const EnvSchema = z.object({
-  DISCORD_TOKEN: z.string().min(1, 'DISCORD_TOKEN は必須です'),
-  CONFIG_PATH: z.string().min(1).default('./config.json'),
-  LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+  DISCORD_TOKEN: z.preprocess(emptyToUndefined, z.string().min(1, 'DISCORD_TOKEN は必須です')),
+  CONFIG_PATH: z.preprocess(emptyToUndefined, z.string().min(1).default('./config.json')),
+  LOG_LEVEL: z.preprocess(
+    emptyToUndefined,
+    z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+  ),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
 
 /**
- * process.env を検証して返す。検証失敗時は ZodError を投げるので、
- * 呼び出し側で fatal ログを出し非ゼロ終了する (systemd が再起動)。
- * テスト時は source を注入する。
+ * process.env を検証して返す。env は起動必須のため無効時は Error を投げる
+ * (呼び出し側で fatal ログ → 非ゼロ終了。systemd が再起動)。
+ * config と同じ validate ヘルパで検証する (「同じ仕組み」)。
  */
 export function parseEnv(source: NodeJS.ProcessEnv = process.env): Env {
-  return EnvSchema.parse(source);
+  const result = validate(EnvSchema, source);
+  if (!result.ok) {
+    throw new Error(`環境変数の検証に失敗しました:\n- ${result.issues.join('\n- ')}`);
+  }
+  return result.data;
 }
