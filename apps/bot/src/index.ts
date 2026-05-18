@@ -25,7 +25,7 @@ async function main(): Promise<void> {
   logger.info('co-workingCall bot 起動中');
 
   try {
-    await startBot(env.DISCORD_TOKEN, logger);
+    await startBot(env.DISCORD_TOKEN, logger, env.CONFIG_PATH);
   } catch (err) {
     logger.fatal({ err }, 'Discord ログインに失敗しました');
     process.exitCode = 1;

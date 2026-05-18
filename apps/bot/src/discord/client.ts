@@ -1,11 +1,11 @@
 import { Client, Events, GatewayIntentBits } from 'discord.js';
 import type { Logger } from 'pino';
+import { handlePomoInit, registerCommands } from '../commands/index.js';
 
 /**
  * Discord Client を生成する。
- * US-4 は最小ログインのみのため intents は Guilds だけ。
- * VC (GuildVoiceStates) やメッセージ (GuildMessages/MessageContent) は
- * 必要になる US (US-10/US-16 等) で追加する。
+ * US-6 時点でも intents は Guilds のみ (interaction 受信・channel 種別判定に十分)。
+ * VC (GuildVoiceStates) / メッセージ (GuildMessages) は必要になる US で追加する。
  */
 export function createClient(): Client {
   return new Client({
@@ -15,13 +15,24 @@ export function createClient(): Client {
 
 /**
  * Discord にログインし READY を待つ。
- * VC 接続・スラッシュコマンドは US-4 では実装しない。
+ * READY 時に参加ギルドへスラッシュコマンドを登録し、
+ * /pomo init を interactionCreate で処理する。
  */
-export async function startBot(token: string, logger: Logger): Promise<Client> {
+export async function startBot(token: string, logger: Logger, configPath: string): Promise<Client> {
   const client = createClient();
 
   client.once(Events.ClientReady, (ready) => {
     logger.info({ tag: ready.user.tag, id: ready.user.id }, 'Discord bot READY');
+    void registerCommands(ready, token, logger);
+  });
+
+  client.on(Events.InteractionCreate, (interaction) => {
+    if (!interaction.isChatInputCommand()) {
+      return;
+    }
+    if (interaction.commandName === 'pomo' && interaction.options.getSubcommand(false) === 'init') {
+      void handlePomoInit(interaction, configPath, logger);
+    }
   });
 
   client.on(Events.Error, (err) => {
