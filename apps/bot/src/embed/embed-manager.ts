@@ -61,7 +61,7 @@ export function shouldHandleHumanMessage(params: {
 export class EmbedManager {
   readonly #channel: EmbedChannel;
   readonly #timer: TimerLike;
-  readonly #config: BotConfig;
+  #config: BotConfig;
   readonly #logger: Logger;
   readonly #debouncer: RepostDebouncer;
   readonly #soundNotifier: PhaseSoundNotifier | undefined;
@@ -150,6 +150,14 @@ export class EmbedManager {
     await this.#deleteTimerEmbed();
     const posted = await this.#channel.post(buildStartEmbedMessage(this.#config));
     this.#startEmbedId = posted.id;
+  }
+
+  /** 設定変更時にスタート用 Embed の内容を更新する (US-12)。 */
+  async updateStartEmbed(config: BotConfig): Promise<void> {
+    this.#config = config;
+    if (this.#startEmbedId !== null) {
+      await this.#channel.edit(this.#startEmbedId, buildStartEmbedMessage(this.#config));
+    }
   }
 
   async #onPhaseChange(snapshot: TimerSnapshot): Promise<void> {

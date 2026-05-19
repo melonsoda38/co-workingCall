@@ -2,3 +2,4 @@
 export * from './checks.js';
 export * from './pomo.js';
 export * from './register.js';
+export * from './settings-modal.js';

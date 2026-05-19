@@ -48,12 +48,14 @@ class FakeTimer implements TimerLike {
 
 function fakeChannel() {
   let n = 0;
-  const post = vi.fn((): Promise<PostedMessage> => {
+  const post = vi.fn<() => Promise<PostedMessage>>(() => {
     n += 1;
     return Promise.resolve({ id: `m${String(n)}` });
   });
-  const edit = vi.fn(() => Promise.resolve());
-  const del = vi.fn(() => Promise.resolve());
+  const edit = vi.fn<(messageId: string, options: unknown) => Promise<void>>(() =>
+    Promise.resolve(),
+  );
+  const del = vi.fn<(messageId: string) => Promise<void>>(() => Promise.resolve());
   const channel: EmbedChannel = { post, edit, delete: del };
   return { channel, post, edit, del };
 }
@@ -211,9 +213,39 @@ describe('EmbedManager フェーズ切替の通知音 (US-11)', () => {
     expect(sound.playFinalStart).toHaveBeenCalledTimes(1);
     expect(m.timerEmbedId).not.toBeNull();
 
-    // 再投稿後も updater が新 timerEmbedId を 5秒ごとに edit する。
     const before = edit.mock.calls.length;
     await vi.advanceTimersByTimeAsync(5_000);
     expect(edit.mock.calls.length).toBeGreaterThan(before);
+  });
+});
+
+describe('EmbedManager.updateStartEmbed (US-12)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('startEmbed を新 config で edit する', async () => {
+    const { channel, edit } = fakeChannel();
+    const m = new EmbedManager({ channel, timer: new FakeTimer(), config, logger });
+    await m.onIdle(); // startEmbedId = m1
+
+    const newConfig: BotConfig = {
+      ...config,
+      default: { ...config.default, workSec: 3000 },
+    };
+    await m.updateStartEmbed(newConfig);
+
+    expect(edit).toHaveBeenCalled();
+    expect(edit.mock.calls[0]?.[0]).toBe('m1');
+  });
+
+  it('startEmbed 未投稿なら edit しない', async () => {
+    const { channel, edit } = fakeChannel();
+    const m = new EmbedManager({ channel, timer: new FakeTimer(), config, logger });
+    await m.updateStartEmbed(config);
+    expect(edit).not.toHaveBeenCalled();
   });
 });
