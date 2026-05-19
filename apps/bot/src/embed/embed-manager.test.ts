@@ -1,0 +1,148 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Logger } from 'pino';
+import type { BotConfig, TimerSnapshot } from '@co-working-call/shared';
+import {
+  EmbedManager,
+  shouldHandleHumanMessage,
+  type EmbedChannel,
+  type PostedMessage,
+  type TimerLike,
+} from './embed-manager.js';
+
+const config: BotConfig = {
+  default: { workSec: 1500, breakSec: 300, sets: 4, finalBreakSec: 900 },
+  guildId: 'g',
+  voiceChannelId: 'vc',
+  adminRoleName: 'pomo-admin',
+};
+
+function makeSnapshot(phase: TimerSnapshot['phase']): TimerSnapshot {
+  return { phase, remainingMs: 1_000, currentSet: 1, totalSets: 4, startedAt: 0 };
+}
+
+type Ev = 'phaseChange' | 'countdown' | 'ended';
+
+class FakeTimer implements TimerLike {
+  snapshot: TimerSnapshot = makeSnapshot('idle');
+  #listeners = new Map<Ev, ((s: TimerSnapshot) => void)[]>();
+
+  getSnapshot(): TimerSnapshot {
+    return this.snapshot;
+  }
+
+  on(event: Ev, listener: (s: TimerSnapshot) => void): unknown {
+    const arr = this.#listeners.get(event) ?? [];
+    arr.push(listener);
+    this.#listeners.set(event, arr);
+    return this;
+  }
+
+  emit(event: Ev, s: TimerSnapshot): void {
+    this.snapshot = s;
+    for (const l of this.#listeners.get(event) ?? []) {
+      l(s);
+    }
+  }
+}
+
+function fakeChannel() {
+  let n = 0;
+  const post = vi.fn((): Promise<PostedMessage> => {
+    n += 1;
+    return Promise.resolve({ id: `m${String(n)}` });
+  });
+  const edit = vi.fn(() => Promise.resolve());
+  const del = vi.fn(() => Promise.resolve());
+  const channel: EmbedChannel = { post, edit, delete: del };
+  return { channel, post, edit, del };
+}
+
+const logger = {
+  error: vi.fn(),
+  warn: vi.fn(),
+  info: vi.fn(),
+  debug: vi.fn(),
+} as unknown as Logger;
+
+describe('shouldHandleHumanMessage', () => {
+  it('bot は除外、対象チャンネルのみ true', () => {
+    expect(
+      shouldHandleHumanMessage({ authorIsBot: false, channelId: 'vc', targetChannelId: 'vc' }),
+    ).toBe(true);
+    expect(
+      shouldHandleHumanMessage({ authorIsBot: true, channelId: 'vc', targetChannelId: 'vc' }),
+    ).toBe(false);
+    expect(
+      shouldHandleHumanMessage({ authorIsBot: false, channelId: 'x', targetChannelId: 'vc' }),
+    ).toBe(false);
+  });
+});
+
+describe('EmbedManager', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('onIdle はスタート Embed を投稿する', async () => {
+    const { channel, post } = fakeChannel();
+    const m = new EmbedManager({ channel, timer: new FakeTimer(), config, logger });
+    await m.onIdle();
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(m.startEmbedId).toBe('m1');
+  });
+
+  it('phaseChange: 初回 work で start削除→timer投稿、work→break で再投稿', async () => {
+    const { channel, del } = fakeChannel();
+    const timer = new FakeTimer();
+    const m = new EmbedManager({ channel, timer, config, logger });
+    await m.onIdle(); // m1 = start
+
+    timer.emit('phaseChange', makeSnapshot('work'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(del).toHaveBeenCalledWith('m1');
+    expect(m.timerEmbedId).toBe('m2');
+
+    timer.emit('phaseChange', makeSnapshot('break'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(del).toHaveBeenCalledWith('m2');
+    expect(m.timerEmbedId).toBe('m3');
+  });
+
+  it('onHumanMessage は work 中のみデバウンス→再投稿 (60s)、idle は無視', async () => {
+    const { channel, post } = fakeChannel();
+    const timer = new FakeTimer();
+    const m = new EmbedManager({ channel, timer, config, logger });
+    timer.emit('phaseChange', makeSnapshot('work'));
+    await vi.advanceTimersByTimeAsync(0);
+    const before = post.mock.calls.length;
+
+    m.onHumanMessage();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(post.mock.calls.length).toBe(before + 1);
+
+    timer.snapshot = makeSnapshot('idle');
+    m.onHumanMessage();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(post.mock.calls.length).toBe(before + 1);
+  });
+
+  it('countdown で edit、ended で削除→スタート投稿', async () => {
+    const { channel, edit, del } = fakeChannel();
+    const timer = new FakeTimer();
+    const m = new EmbedManager({ channel, timer, config, logger });
+    timer.emit('phaseChange', makeSnapshot('work'));
+    await vi.advanceTimersByTimeAsync(0);
+
+    timer.emit('countdown', makeSnapshot('countdown'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(edit).toHaveBeenCalled();
+
+    timer.emit('ended', makeSnapshot('ended'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(del).toHaveBeenCalled();
+    expect(m.startEmbedId).not.toBeNull();
+  });
+});

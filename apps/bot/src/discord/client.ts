@@ -4,12 +4,12 @@ import { handlePomoInit, registerCommands } from '../commands/index.js';
 
 /**
  * Discord Client を生成する。
- * US-6 時点でも intents は Guilds のみ (interaction 受信・channel 種別判定に十分)。
- * VC (GuildVoiceStates) / メッセージ (GuildMessages) は必要になる US で追加する。
+ * intents は Guilds (interaction/channel 種別) と GuildMessages (messageCreate 検知, US-10)。
+ * 人間メッセージは「存在検知」のみで内容は読まないため MessageContent は不要。
  */
 export function createClient(): Client {
   return new Client({
-    intents: [GatewayIntentBits.Guilds],
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
   });
 }
 
@@ -33,6 +33,15 @@ export async function startBot(token: string, logger: Logger, configPath: string
     if (interaction.commandName === 'pomo' && interaction.options.getSubcommand(false) === 'init') {
       void handlePomoInit(interaction, configPath, logger);
     }
+  });
+
+  client.on(Events.MessageCreate, (message) => {
+    if (message.author.bot) {
+      return;
+    }
+    // EmbedManager.onHumanMessage への接続は、タイマー開始フロー (US-12) で
+    // EmbedManager のライフサイクルが確定してから配線する。US-10 では検知のみ。
+    logger.debug({ channelId: message.channelId }, '人間メッセージ検知 (messageCreate)');
   });
 
   client.on(Events.Error, (err) => {
