@@ -3,4 +3,5 @@ export * from './start-embed.js';
 export * from './timer-embed.js';
 export * from './timer-embed-updater.js';
 export * from './repost-debouncer.js';
+export * from './sound-notifier.js';
 export * from './embed-manager.js';

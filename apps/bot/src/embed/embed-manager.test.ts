@@ -8,6 +8,7 @@ import {
   type PostedMessage,
   type TimerLike,
 } from './embed-manager.js';
+import type { PhaseSoundNotifier } from './sound-notifier.js';
 
 const config: BotConfig = {
   default: { workSec: 1500, breakSec: 300, sets: 4, finalBreakSec: 900 },
@@ -55,6 +56,14 @@ function fakeChannel() {
   const del = vi.fn(() => Promise.resolve());
   const channel: EmbedChannel = { post, edit, delete: del };
   return { channel, post, edit, del };
+}
+
+function fakeSound() {
+  const playWorkEnd = vi.fn();
+  const playBreakEnd = vi.fn();
+  const playFinalStart = vi.fn();
+  const notifier: PhaseSoundNotifier = { playWorkEnd, playBreakEnd, playFinalStart };
+  return { notifier, playWorkEnd, playBreakEnd, playFinalStart };
 }
 
 const logger = {
@@ -144,5 +153,67 @@ describe('EmbedManager', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(del).toHaveBeenCalled();
     expect(m.startEmbedId).not.toBeNull();
+  });
+});
+
+describe('EmbedManager フェーズ切替の通知音 (US-11)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('初回 work は通知音なし、work→break=workEnd、break→work=breakEnd', async () => {
+    const { channel } = fakeChannel();
+    const timer = new FakeTimer();
+    const sound = fakeSound();
+    const m = new EmbedManager({
+      channel,
+      timer,
+      config,
+      logger,
+      soundNotifier: sound.notifier,
+    });
+
+    timer.emit('phaseChange', makeSnapshot('work')); // 初回 (idle→work)
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sound.playWorkEnd).not.toHaveBeenCalled();
+    expect(m.timerEmbedId).not.toBeNull();
+
+    timer.emit('phaseChange', makeSnapshot('break')); // work→break
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sound.playWorkEnd).toHaveBeenCalledTimes(1);
+
+    timer.emit('phaseChange', makeSnapshot('work')); // break→work
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sound.playBreakEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it('work→finalBreak で finalStart を鳴らし再投稿後も 5秒更新が続く', async () => {
+    const { channel, edit } = fakeChannel();
+    const timer = new FakeTimer();
+    const sound = fakeSound();
+    const m = new EmbedManager({
+      channel,
+      timer,
+      config,
+      logger,
+      soundNotifier: sound.notifier,
+    });
+
+    timer.emit('phaseChange', makeSnapshot('work'));
+    await vi.advanceTimersByTimeAsync(0);
+
+    timer.snapshot = makeSnapshot('finalBreak');
+    timer.emit('phaseChange', makeSnapshot('finalBreak'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sound.playFinalStart).toHaveBeenCalledTimes(1);
+    expect(m.timerEmbedId).not.toBeNull();
+
+    // 再投稿後も updater が新 timerEmbedId を 5秒ごとに edit する。
+    const before = edit.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(edit.mock.calls.length).toBeGreaterThan(before);
   });
 });
