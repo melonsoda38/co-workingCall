@@ -1,10 +1,15 @@
 import type { BaseMessageOptions, MessageCreateOptions } from 'discord.js';
 import type { Logger } from 'pino';
-import type { BotConfig, TimerSnapshot } from '@co-working-call/shared';
+import type { BotConfig, TimerPhase, TimerSnapshot } from '@co-working-call/shared';
 import { buildStartEmbedMessage } from './start-embed.js';
 import { buildTimerEmbedContent, buildTimerEmbedMessage } from './timer-embed.js';
 import { RepostDebouncer } from './repost-debouncer.js';
 import { TimerEmbedUpdater } from './timer-embed-updater.js';
+import {
+  playPhaseTransitionSound,
+  phaseTransitionSound,
+  type PhaseSoundNotifier,
+} from './sound-notifier.js';
 
 /** 投稿済みメッセージ (id のみ必要)。 */
 export interface PostedMessage {
@@ -32,6 +37,8 @@ export interface EmbedManagerDeps {
   timer: TimerLike;
   config: BotConfig;
   logger: Logger;
+  /** フェーズ切替の通知音 (US-15 で実 SoundPlayer を注入。未指定なら無音)。 */
+  soundNotifier?: PhaseSoundNotifier;
 }
 
 /**
@@ -48,7 +55,8 @@ export function shouldHandleHumanMessage(params: {
 
 /**
  * 3種の Embed ライフサイクルを統合する (embed-spec EmbedManager 設計指針)。
- * US-10 は中核 + フック骨格。通知音 (US-11/15/18)・終了演出の VC 退出等 (US-19) は後続。
+ * US-11 でフェーズ切替の強制リセット (通知音 → 削除&再投稿 → デバウンスclear →
+ * 5秒更新リセット) を完成。終了演出の VC 退出等 (US-19) は後続。
  */
 export class EmbedManager {
   readonly #channel: EmbedChannel;
@@ -56,6 +64,8 @@ export class EmbedManager {
   readonly #config: BotConfig;
   readonly #logger: Logger;
   readonly #debouncer: RepostDebouncer;
+  readonly #soundNotifier: PhaseSoundNotifier | undefined;
+  #currentPhase: TimerPhase = 'idle';
   #startEmbedId: string | null = null;
   #timerEmbedId: string | null = null;
   #updater: TimerEmbedUpdater | null = null;
@@ -65,6 +75,7 @@ export class EmbedManager {
     this.#timer = deps.timer;
     this.#config = deps.config;
     this.#logger = deps.logger;
+    this.#soundNotifier = deps.soundNotifier;
     this.#debouncer = new RepostDebouncer({
       callback: () => this.#repostTimerEmbed(),
       onError: (err) => {
@@ -95,6 +106,7 @@ export class EmbedManager {
     this.#updater?.stop();
     this.#updater = null;
     this.#debouncer.cancel();
+    this.#currentPhase = 'idle';
     await this.#deleteTimerEmbed();
     const posted = await this.#channel.post(buildStartEmbedMessage(this.#config));
     this.#startEmbedId = posted.id;
@@ -102,6 +114,7 @@ export class EmbedManager {
 
   /** タイマー開始: スタート削除 → タイマー用投稿 → 5秒更新開始。 */
   async onTimerStart(): Promise<void> {
+    this.#currentPhase = 'work';
     await this.#deleteStartEmbed();
     const snapshot = this.#timer.getSnapshot();
     const posted = await this.#channel.post(buildTimerEmbedMessage(snapshot, this.#config));
@@ -119,6 +132,7 @@ export class EmbedManager {
 
   /** countdown 突入: 再投稿 OFF・5秒更新停止・countdown 表示に edit。 */
   async onCountdownEnter(): Promise<void> {
+    this.#currentPhase = 'countdown';
     this.#debouncer.cancel();
     this.#updater?.stop();
     if (this.#timerEmbedId !== null) {
@@ -132,26 +146,35 @@ export class EmbedManager {
     this.#updater?.stop();
     this.#updater = null;
     this.#debouncer.cancel();
+    this.#currentPhase = 'idle';
     await this.#deleteTimerEmbed();
     const posted = await this.#channel.post(buildStartEmbedMessage(this.#config));
     this.#startEmbedId = posted.id;
   }
 
   async #onPhaseChange(snapshot: TimerSnapshot): Promise<void> {
-    const { phase } = snapshot;
-    if (phase !== 'work' && phase !== 'break' && phase !== 'finalBreak') {
+    const to = snapshot.phase;
+    if (to !== 'work' && to !== 'break' && to !== 'finalBreak') {
       // countdown/ended/idle は専用ハンドラで処理する。
       return;
     }
+    const from = this.#currentPhase;
+    this.#currentPhase = to;
+
     if (this.#timerEmbedId === null) {
-      // 初回 (idle→work): スタート削除 → タイマー投稿。
+      // 初回 (idle→work): スタート削除 → タイマー投稿 (通知音なし)。
       await this.onTimerStart();
       return;
     }
-    // 中間切替 (work↔break, work→finalBreak): デバウンスクリア + 削除&再投稿。
-    // 通知音は US-11 で追加する。
+
+    // 中間切替 (work↔break, work→finalBreak) の強制リセット (embed-spec §フェーズ切替):
+    // 1. 通知音 → 2-3. 旧Embed削除&新Embed投稿 → 4. デバウンスclear → 5. 5秒更新リセット。
+    if (this.#soundNotifier) {
+      playPhaseTransitionSound(this.#soundNotifier, phaseTransitionSound(from, to));
+    }
     this.#debouncer.cancel();
     await this.#repostTimerEmbed();
+    this.#startUpdater();
   }
 
   async #repostTimerEmbed(): Promise<void> {
