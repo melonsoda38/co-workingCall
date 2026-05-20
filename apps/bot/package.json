@@ -9,11 +9,16 @@
     "build": "tsc -b",
     "typecheck": "tsc -b",
     "start": "node --env-file=.env ./dist/index.js",
+    "smoke:audio": "node ./dist/audio/smoke.js",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@co-working-call/shared": "workspace:*",
+    "@discordjs/voice": "^0.18.0",
     "discord.js": "^14",
+    "ffmpeg-static": "^5.3.0",
+    "libsodium-wrappers": "^0.8.4",
+    "opusscript": "^0.1.1",
     "pino": "^9",
     "zod": "^3"
   },
