@@ -4,12 +4,20 @@ import type { Logger } from 'pino';
 import type { BotConfig } from '@co-working-call/shared';
 import { createDiscordSoundPlayer } from '../audio/index.js';
 import { createDiscordEmbedChannel } from '../discord/discord-embed-channel.js';
+import { buildEntryMessageOptions } from '../messages.js';
 import { createPomodoroSession } from '../session/index.js';
 import { VoiceManager, isTargetVcEvent, type VoiceConnectionHandle } from './voice-manager.js';
 
 /** VC の人間 (非 bot) メンバー数を数える (voice-spec)。 */
 export function countHumans(channel: VoiceChannel): number {
   return channel.members.filter((member) => !member.user.bot).size;
+}
+
+/** 入室メッセージを VC 内蔵テキスト欄へ送る (失敗してもログのみ、接続は維持)。 */
+function postEntryMessage(channel: VoiceChannel, logger: Logger): void {
+  void channel.send(buildEntryMessageOptions()).catch((err: unknown) => {
+    logger.error({ err }, '入室メッセージの送信に失敗しました');
+  });
 }
 
 /** 対象 VC へ接続する。失敗時は null (リトライしない: voice-spec)。 */
@@ -81,9 +89,8 @@ export async function setupVoiceFeature(
     soundPlayer,
     timer: session.timer,
     connect: () => Promise.resolve(connectToVc(channel, logger)),
-    // 入室メッセージの内容・実送信は US-17。ここではフックのみ。
     sendEntryMessage: () => {
-      logger.debug('入室メッセージ送信は US-17 で実装');
+      postEntryMessage(channel, logger);
     },
     resetToIdle: () => session.embedManager.onIdle(),
   });
