@@ -7,17 +7,38 @@ import {
   handleSettingsModalSubmit,
   registerCommands,
 } from '../commands/index.js';
+import { loadConfig } from '../config/index.js';
 import { SETTINGS_BUTTON_ID } from '../embed/index.js';
+import { setupVoiceFeature } from '../voice/index.js';
 
 /**
  * Discord Client を生成する。
- * intents は Guilds (interaction/channel 種別) と GuildMessages (messageCreate 検知)。
+ * intents は Guilds (interaction/channel 種別)、GuildMessages (messageCreate 検知)、
+ * GuildVoiceStates (voiceStateUpdate と VC メンバー把握)。
  * 人間メッセージは存在検知のみで内容は読まないため MessageContent は不要。
  */
 export function createClient(): Client {
   return new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.GuildVoiceStates,
+    ],
   });
+}
+
+/** READY 後、config 有効なら VC 自動入退室機能を結線する (US-16)。 */
+async function setupVoiceOnReady(
+  client: Client<true>,
+  configPath: string,
+  logger: Logger,
+): Promise<void> {
+  const result = await loadConfig(configPath);
+  if (result.status !== 'ok') {
+    logger.info('config 未確定のため VC 機能は待機 (/pomo init 後の再起動で有効化)');
+    return;
+  }
+  await setupVoiceFeature(client, result.config, logger);
 }
 
 /**
@@ -30,6 +51,7 @@ export async function startBot(token: string, logger: Logger, configPath: string
   client.once(Events.ClientReady, (ready) => {
     logger.info({ tag: ready.user.tag, id: ready.user.id }, 'Discord bot READY');
     void registerCommands(ready, token, logger);
+    void setupVoiceOnReady(ready, configPath, logger);
   });
 
   client.on(Events.InteractionCreate, (interaction) => {
