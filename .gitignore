@@ -13,5 +13,7 @@ dist/
 # ランタイム生成設定 (/pomo init で生成される)
 apps/bot/config.json
 
-# 音源ファイルはリポジトリに含める (US-14 で配置)
-!apps/bot/assets/sounds/*.mp3
+# 音源ファイルはライセンス上リポジトリに含めない (再配布制限のため)。
+# デプロイ時に apps/bot/assets/sounds/ へ手動配置する。詳細は同 LICENSE.md 参照。
+apps/bot/assets/sounds/*.mp3
+apps/bot/assets/sounds/*.ogg
