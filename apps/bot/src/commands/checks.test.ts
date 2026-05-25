@@ -2,7 +2,8 @@ import { ChannelType, PermissionFlagsBits, PermissionsBitField } from 'discord.j
 import { describe, expect, it } from 'vitest';
 import {
   REQUIRED_BOT_PERMISSIONS,
-  hasAdminRole,
+  buildAllowedRoleNames,
+  hasAnyAdminRole,
   isVoiceTextContext,
   missingBotPermissions,
 } from './checks.js';
@@ -15,11 +16,27 @@ describe('isVoiceTextContext', () => {
   });
 });
 
-describe('hasAdminRole', () => {
-  it('adminRoleName を含めば true', () => {
-    expect(hasAdminRole(['pomo-admin', 'member'], 'pomo-admin')).toBe(true);
-    expect(hasAdminRole(['member'], 'pomo-admin')).toBe(false);
-    expect(hasAdminRole([], 'pomo-admin')).toBe(false);
+describe('buildAllowedRoleNames', () => {
+  it('基準ロール + 追加ロールを重複なくまとめる', () => {
+    expect(buildAllowedRoleNames('pomo-admin', [])).toEqual(['pomo-admin']);
+    expect(buildAllowedRoleNames('pomo-admin', ['mod', '運営'])).toEqual([
+      'pomo-admin',
+      'mod',
+      '運営',
+    ]);
+    expect(buildAllowedRoleNames('pomo-admin', ['pomo-admin', 'mod'])).toEqual([
+      'pomo-admin',
+      'mod',
+    ]);
+  });
+});
+
+describe('hasAnyAdminRole', () => {
+  it('許可ロールのいずれかを持てば true', () => {
+    expect(hasAnyAdminRole(['member', 'mod'], ['pomo-admin', 'mod'])).toBe(true);
+    expect(hasAnyAdminRole(['pomo-admin'], ['pomo-admin'])).toBe(true);
+    expect(hasAnyAdminRole(['member'], ['pomo-admin', 'mod'])).toBe(false);
+    expect(hasAnyAdminRole([], ['pomo-admin'])).toBe(false);
   });
 });
 

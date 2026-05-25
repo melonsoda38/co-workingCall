@@ -15,6 +15,7 @@ const config: BotConfig = {
   guildId: 'g',
   voiceChannelId: 'vc',
   adminRoleName: 'pomo-admin',
+  adminRoleNames: [],
 };
 
 function makeSnapshot(phase: TimerSnapshot['phase']): TimerSnapshot {

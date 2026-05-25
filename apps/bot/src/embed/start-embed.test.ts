@@ -19,6 +19,7 @@ const config: BotConfig = {
   guildId: 'g',
   voiceChannelId: 'v',
   adminRoleName: 'pomo-admin',
+  adminRoleNames: [],
 };
 
 describe('formatConfigSummary', () => {

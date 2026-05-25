@@ -62,6 +62,7 @@ function makeSession(opts?: { phase?: TimerSnapshot['phase']; connected?: boolea
     guildId: 'guild-1',
     voiceChannelId: TARGET_VC,
     adminRoleName: 'pomo-admin',
+    adminRoleNames: [],
   };
   const session = {
     config,
@@ -90,6 +91,7 @@ describe('handleStartButton', () => {
         guildId: 'guild-1',
         voiceChannelId: TARGET_VC,
         adminRoleName: 'pomo-admin',
+        adminRoleNames: [],
       },
     });
   });
