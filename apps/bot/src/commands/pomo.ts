@@ -9,7 +9,7 @@ import type { BotConfig } from '@co-working-call/shared';
 import { loadConfig, saveConfig } from '../config/index.js';
 import { buildStartEmbedMessage } from '../embed/index.js';
 import type { VoiceSession } from '../voice/session-registry.js';
-import { hasAdminRole, missingBotPermissions } from './checks.js';
+import { hasAdminRole, isVoiceTextContext, missingBotPermissions } from './checks.js';
 
 /** config 未存在時の初期タイマー設定 (commands-spec モーダル placeholder: 25/5/4/15 分)。 */
 const DEFAULT_TIMER: BotConfig['default'] = {
@@ -18,6 +18,9 @@ const DEFAULT_TIMER: BotConfig['default'] = {
   sets: 4,
   finalBreakSec: 15 * 60,
 };
+
+/** VC 内蔵テキスト欄以外で /pomo 系コマンドを実行したときの共通エラー文言。 */
+const VC_TEXT_ONLY_MESSAGE = 'このコマンドはボイスチャンネル内のテキスト欄で実行してください';
 
 export const pomoCommand = new SlashCommandBuilder()
   .setName('pomo')
@@ -29,6 +32,9 @@ export const pomoCommand = new SlashCommandBuilder()
     sub
       .setName('stop')
       .setDescription('タイマーを強制停止してスタート画面に戻す (設定は保持・テスト用)'),
+  )
+  .addSubcommand((sub) =>
+    sub.setName('join').setDescription('bot を VC に再入室させる (タイマーは開始しない)'),
   );
 
 /**
@@ -45,7 +51,7 @@ export async function handlePomoInit(
 
     const channel = interaction.channel;
     if (channel?.type !== ChannelType.GuildVoice) {
-      await interaction.editReply('このコマンドはボイスチャンネル内のテキスト欄で実行してください');
+      await interaction.editReply(VC_TEXT_ONLY_MESSAGE);
       return;
     }
     const guild = interaction.guild;
@@ -126,6 +132,10 @@ export async function handlePomoStop(
   try {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
+    if (!isVoiceTextContext(interaction.channel?.type)) {
+      await interaction.editReply(VC_TEXT_ONLY_MESSAGE);
+      return;
+    }
     if (!session) {
       await interaction.editReply(
         'セットアップが必要です。/pomo init 実行後に bot を再起動してください',
@@ -164,6 +174,77 @@ export async function handlePomoStop(
       } else {
         await interaction.reply({
           content: '停止処理に失敗しました。ログを確認してください',
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+    } catch (replyErr) {
+      logger.error({ err: replyErr }, 'エラー応答にも失敗しました');
+    }
+  }
+}
+
+/**
+ * /pomo join ハンドラ。bot を対象 VC へ再入室させる (タイマーは開始しない)。
+ * /pomo stop で退出させた後、VC に居たまま bot を呼び戻す用途。
+ * 実行権限は pomo-admin ロール。セッションは VoiceSessionRegistry から解決して渡す。
+ */
+export async function handlePomoJoin(
+  interaction: ChatInputCommandInteraction,
+  session: VoiceSession | undefined,
+  logger: Logger,
+): Promise<void> {
+  try {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    if (!isVoiceTextContext(interaction.channel?.type)) {
+      await interaction.editReply(VC_TEXT_ONLY_MESSAGE);
+      return;
+    }
+    if (!session) {
+      await interaction.editReply(
+        'セットアップが必要です。/pomo init 実行後に bot を再起動してください',
+      );
+      return;
+    }
+    const guild = interaction.guild;
+    if (!guild) {
+      await interaction.editReply('サーバー内で実行してください');
+      return;
+    }
+
+    const member = await guild.members.fetch(interaction.user.id);
+    const roleNames = member.roles.cache.map((role) => role.name);
+    if (!hasAdminRole(roleNames, session.config.adminRoleName)) {
+      await interaction.editReply(
+        `このコマンドの実行には ${session.config.adminRoleName} ロールが必要です`,
+      );
+      return;
+    }
+
+    // 既に VC に居る場合は何もしない (実行者にのみ ephemeral で通知)。
+    if (session.voiceManager.connected) {
+      await interaction.editReply('bot は既に VC に入室しています');
+      return;
+    }
+
+    // 対象 VC へ再入室。タイマーには触れない。
+    const connected = await session.voiceManager.ensureConnected();
+    if (!connected) {
+      await interaction.editReply('VCへの接続に失敗しました。ログを確認してください');
+      return;
+    }
+
+    // 成功時は確認メッセージを出さない (bot が VC に現れることで分かる)。
+    await interaction.deleteReply();
+    logger.info({ guildId: guild.id }, '/pomo join 実行');
+  } catch (err) {
+    logger.error({ err }, '/pomo join 処理に失敗しました');
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply('再入室処理に失敗しました。ログを確認してください');
+      } else {
+        await interaction.reply({
+          content: '再入室処理に失敗しました。ログを確認してください',
           flags: MessageFlags.Ephemeral,
         });
       }

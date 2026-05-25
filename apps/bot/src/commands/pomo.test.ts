@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ChatInputCommandInteraction } from 'discord.js';
+import { ChannelType, type ChatInputCommandInteraction } from 'discord.js';
 import type { Logger } from 'pino';
 import type { BotConfig } from '@co-working-call/shared';
 import type { VoiceSession } from '../voice/session-registry.js';
-import { handlePomoStop } from './pomo.js';
+import { handlePomoJoin, handlePomoStop } from './pomo.js';
 
 const logger = {
   error: vi.fn(),
@@ -19,7 +19,7 @@ const CONFIG: BotConfig = {
   adminRoleName: 'pomo-admin',
 };
 
-function makeInteraction(roleNames: string[]) {
+function makeInteraction(roleNames: string[], channelType: ChannelType = ChannelType.GuildVoice) {
   const deferReply = vi.fn<() => Promise<void>>(() => Promise.resolve());
   const editReply = vi.fn<() => Promise<void>>(() => Promise.resolve());
   const deleteReply = vi.fn<() => Promise<void>>(() => Promise.resolve());
@@ -30,6 +30,7 @@ function makeInteraction(roleNames: string[]) {
     user: { id: 'user-1' },
     guildId: 'guild-1',
     guild: { id: 'guild-1', members: { fetch } },
+    channel: { type: channelType },
     deferred: true,
     replied: false,
     deferReply,
@@ -39,27 +40,40 @@ function makeInteraction(roleNames: string[]) {
   return { interaction, deferReply, editReply, deleteReply, fetch };
 }
 
-function makeSession(): {
+function makeSession(opts?: { connected?: boolean; alreadyConnected?: boolean }): {
   session: VoiceSession;
   stop: ReturnType<typeof vi.fn>;
   onIdle: ReturnType<typeof vi.fn>;
   forceDisconnect: ReturnType<typeof vi.fn>;
+  ensureConnected: ReturnType<typeof vi.fn>;
 } {
   const stop = vi.fn();
   const onIdle = vi.fn(() => Promise.resolve());
   const forceDisconnect = vi.fn();
+  const ensureConnected = vi.fn(() => Promise.resolve(opts?.connected ?? true));
   const session = {
     config: CONFIG,
     timer: { stop, getSnapshot: vi.fn() },
     embedManager: { onIdle },
-    voiceManager: { forceDisconnect },
+    voiceManager: { forceDisconnect, ensureConnected, connected: opts?.alreadyConnected ?? false },
   } as unknown as VoiceSession;
-  return { session, stop, onIdle, forceDisconnect };
+  return { session, stop, onIdle, forceDisconnect, ensureConnected };
 }
 
 describe('handlePomoStop', () => {
   afterEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('テキストチャンネルで実行したら VC テキスト欄エラーを出し停止しない', async () => {
+    const { interaction, editReply } = makeInteraction(['pomo-admin'], ChannelType.GuildText);
+    const { session, stop, forceDisconnect } = makeSession();
+    await handlePomoStop(interaction, session, logger);
+    expect(editReply).toHaveBeenCalledWith(
+      'このコマンドはボイスチャンネル内のテキスト欄で実行してください',
+    );
+    expect(stop).not.toHaveBeenCalled();
+    expect(forceDisconnect).not.toHaveBeenCalled();
   });
 
   it('session が無ければ停止せず ephemeral 応答する', async () => {
@@ -87,5 +101,63 @@ describe('handlePomoStop', () => {
     expect(onIdle).toHaveBeenCalledTimes(1);
     expect(deleteReply).toHaveBeenCalledTimes(1);
     expect(editReply).not.toHaveBeenCalled();
+  });
+});
+
+describe('handlePomoJoin', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('テキストチャンネルで実行したら VC テキスト欄エラーを出し再入室しない', async () => {
+    const { interaction, editReply } = makeInteraction(['pomo-admin'], ChannelType.GuildText);
+    const { session, ensureConnected } = makeSession();
+    await handlePomoJoin(interaction, session, logger);
+    expect(editReply).toHaveBeenCalledWith(
+      'このコマンドはボイスチャンネル内のテキスト欄で実行してください',
+    );
+    expect(ensureConnected).not.toHaveBeenCalled();
+  });
+
+  it('session が無ければ再入室せず ephemeral 応答する', async () => {
+    const { interaction, editReply } = makeInteraction(['pomo-admin']);
+    await handlePomoJoin(interaction, undefined, logger);
+    expect(editReply).toHaveBeenCalledTimes(1);
+  });
+
+  it('pomo-admin ロールが無ければ再入室しない', async () => {
+    const { interaction, editReply } = makeInteraction(['member']);
+    const { session, ensureConnected } = makeSession();
+    await handlePomoJoin(interaction, session, logger);
+    expect(editReply).toHaveBeenCalledTimes(1);
+    expect(ensureConnected).not.toHaveBeenCalled();
+  });
+
+  it('正常系: ensureConnected で再入室し、確認メッセージは出さない', async () => {
+    const { interaction, editReply, deleteReply } = makeInteraction(['pomo-admin']);
+    const { session, ensureConnected, stop } = makeSession();
+    await handlePomoJoin(interaction, session, logger);
+    expect(ensureConnected).toHaveBeenCalledTimes(1);
+    expect(deleteReply).toHaveBeenCalledTimes(1);
+    expect(editReply).not.toHaveBeenCalled();
+    expect(stop).not.toHaveBeenCalled(); // タイマーは触らない
+  });
+
+  it('既に入室済みなら ensureConnected を呼ばず ephemeral エラーを出す', async () => {
+    const { interaction, editReply, deleteReply } = makeInteraction(['pomo-admin']);
+    const { session, ensureConnected } = makeSession({ alreadyConnected: true });
+    await handlePomoJoin(interaction, session, logger);
+    expect(ensureConnected).not.toHaveBeenCalled();
+    expect(editReply).toHaveBeenCalledTimes(1);
+    expect(deleteReply).not.toHaveBeenCalled();
+  });
+
+  it('接続失敗なら ephemeral でエラー応答する', async () => {
+    const { interaction, editReply, deleteReply } = makeInteraction(['pomo-admin']);
+    const { session, ensureConnected } = makeSession({ connected: false });
+    await handlePomoJoin(interaction, session, logger);
+    expect(ensureConnected).toHaveBeenCalledTimes(1);
+    expect(editReply).toHaveBeenCalledTimes(1);
+    expect(deleteReply).not.toHaveBeenCalled();
   });
 });
