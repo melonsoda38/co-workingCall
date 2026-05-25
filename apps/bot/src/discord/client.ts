@@ -5,11 +5,16 @@ import {
   handlePomoInit,
   handleSettingsButton,
   handleSettingsModalSubmit,
+  handleStartButton,
   registerCommands,
 } from '../commands/index.js';
 import { loadConfig } from '../config/index.js';
-import { SETTINGS_BUTTON_ID } from '../embed/index.js';
-import { setupVoiceFeature } from '../voice/index.js';
+import { SETTINGS_BUTTON_ID, START_BUTTON_ID } from '../embed/index.js';
+import {
+  createVoiceSessionRegistry,
+  setupVoiceFeature,
+  type VoiceSessionRegistry,
+} from '../voice/index.js';
 
 /**
  * Discord Client を生成する。
@@ -32,13 +37,14 @@ async function setupVoiceOnReady(
   client: Client<true>,
   configPath: string,
   logger: Logger,
+  sessions: VoiceSessionRegistry,
 ): Promise<void> {
   const result = await loadConfig(configPath);
   if (result.status !== 'ok') {
     logger.info('config 未確定のため VC 機能は待機 (/pomo init 後の再起動で有効化)');
     return;
   }
-  await setupVoiceFeature(client, result.config, logger);
+  await setupVoiceFeature(client, result.config, logger, sessions);
 }
 
 /**
@@ -47,11 +53,12 @@ async function setupVoiceOnReady(
  */
 export async function startBot(token: string, logger: Logger, configPath: string): Promise<Client> {
   const client = createClient();
+  const sessions = createVoiceSessionRegistry();
 
   client.once(Events.ClientReady, (ready) => {
     logger.info({ tag: ready.user.tag, id: ready.user.id }, 'Discord bot READY');
     void registerCommands(ready, token, logger);
-    void setupVoiceOnReady(ready, configPath, logger);
+    void setupVoiceOnReady(ready, configPath, logger, sessions);
   });
 
   client.on(Events.InteractionCreate, (interaction) => {
@@ -62,6 +69,11 @@ export async function startBot(token: string, logger: Logger, configPath: string
       ) {
         void handlePomoInit(interaction, configPath, logger);
       }
+      return;
+    }
+    if (interaction.isButton() && interaction.customId === START_BUTTON_ID) {
+      const session = interaction.guildId ? sessions.get(interaction.guildId) : undefined;
+      void handleStartButton(interaction, session, configPath, logger);
       return;
     }
     if (interaction.isButton() && interaction.customId === SETTINGS_BUTTON_ID) {

@@ -160,6 +160,23 @@ export class EmbedManager {
     }
   }
 
+  /**
+   * 外部 (/pomo init) が投稿済みのスタート Embed を採用し、以後の削除対象にする。
+   * EmbedManager がライフサイクルを所有していない単発スタート Embed を ▶開始時に
+   * 確実に削除するためのフック (Discord 通信は伴わない)。
+   */
+  adoptStartEmbed(messageId: string): void {
+    this.#startEmbedId = messageId;
+  }
+
+  /**
+   * config を差し替える (Discord 通信なし)。▶開始時に config.json の最新値を
+   * 反映してからタイマー Embed を投稿するために使う。Embed の再描画は伴わない。
+   */
+  applyConfig(config: BotConfig): void {
+    this.#config = config;
+  }
+
   async #onPhaseChange(snapshot: TimerSnapshot): Promise<void> {
     const to = snapshot.phase;
     if (to !== 'work' && to !== 'break' && to !== 'finalBreak') {

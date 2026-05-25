@@ -58,8 +58,6 @@ export interface VoiceManagerDeps {
   timer: VoiceTimerControl;
   /** 対象 VC へ接続する。失敗時は null (リトライしない: voice-spec)。 */
   connect: () => Promise<VoiceConnectionHandle | null>;
-  /** 入室メッセージ送信。内容と実送信は US-17。US-16 はフックのみ。 */
-  sendEntryMessage: () => void;
   /** 退出時に idle へ戻す (embedManager.onIdle 相当、暗定復帰)。 */
   resetToIdle: () => Promise<void>;
   /** 空 VC 退出までの猶予 (既定 60 秒、テスト差し替え用)。 */
@@ -76,7 +74,6 @@ export class VoiceManager {
   readonly #soundPlayer: VoiceSoundPlayer;
   readonly #timer: VoiceTimerControl;
   readonly #connect: () => Promise<VoiceConnectionHandle | null>;
-  readonly #sendEntryMessage: () => void;
   readonly #resetToIdle: () => Promise<void>;
   readonly #emptyVcTimeoutMs: number;
 
@@ -89,7 +86,6 @@ export class VoiceManager {
     this.#soundPlayer = deps.soundPlayer;
     this.#timer = deps.timer;
     this.#connect = deps.connect;
-    this.#sendEntryMessage = deps.sendEntryMessage;
     this.#resetToIdle = deps.resetToIdle;
     this.#emptyVcTimeoutMs = deps.emptyVcTimeoutMs ?? EMPTY_VC_TIMEOUT_MS;
   }
@@ -115,27 +111,48 @@ export class VoiceManager {
     this.#disconnect();
   }
 
+  /**
+   * 接続を保証する (▶開始ボタン等から呼ぶ)。未接続なら connect + SoundPlayer.init し、
+   * 入室メッセージは送らない。接続済みかどうかを boolean で返す。
+   */
+  async ensureConnected(): Promise<boolean> {
+    return this.#connectAndInit();
+  }
+
   async #onEnter(): Promise<void> {
     this.#cancelEmptyTimeout();
     if (this.#connection !== null) {
       // 退出待機中の再入室など、既に接続済みなら接続は維持する。
       return;
     }
+    if (!(await this.#connectAndInit())) {
+      return;
+    }
+    this.#logger.info('bot が VC に入室しました');
+  }
+
+  /**
+   * 未接続なら VC へ接続して SoundPlayer を init する共通処理。
+   * 成功 (または既に接続済み) で true、失敗で false。入室メッセージは送らない。
+   */
+  async #connectAndInit(): Promise<boolean> {
+    if (this.#connection !== null) {
+      return true;
+    }
     let connection: VoiceConnectionHandle | null;
     try {
       connection = await this.#connect();
     } catch (err) {
       this.#logger.error({ err }, 'VC 接続に失敗しました');
-      return;
+      return false;
     }
     if (connection === null) {
       this.#logger.warn('VC 接続に失敗しました (connection なし)');
-      return;
+      return false;
     }
     this.#connection = connection;
     this.#soundPlayer.init(connection);
-    this.#sendEntryMessage();
-    this.#logger.info('bot が VC に入室しました');
+    return true;
   }
 
   #onLeave(): void {
