@@ -2,6 +2,7 @@ import { Client, Events, GatewayIntentBits } from 'discord.js';
 import type { Logger } from 'pino';
 import {
   SETTINGS_MODAL_ID,
+  handleAdminRole,
   handlePomoInit,
   handlePomoJoin,
   handlePomoStop,
@@ -66,14 +67,16 @@ export async function startBot(token: string, logger: Logger, configPath: string
   client.on(Events.InteractionCreate, (interaction) => {
     if (interaction.isChatInputCommand()) {
       if (interaction.commandName === 'pomo') {
+        const group = interaction.options.getSubcommandGroup(false);
         const sub = interaction.options.getSubcommand(false);
-        if (sub === 'init') {
+        const session = interaction.guildId ? sessions.get(interaction.guildId) : undefined;
+        if (group === 'admin-role') {
+          void handleAdminRole(interaction, session, configPath, logger);
+        } else if (sub === 'init') {
           void handlePomoInit(interaction, configPath, logger);
         } else if (sub === 'stop') {
-          const session = interaction.guildId ? sessions.get(interaction.guildId) : undefined;
           void handlePomoStop(interaction, session, logger);
         } else if (sub === 'join') {
-          const session = interaction.guildId ? sessions.get(interaction.guildId) : undefined;
           void handlePomoJoin(interaction, session, logger);
         }
       }

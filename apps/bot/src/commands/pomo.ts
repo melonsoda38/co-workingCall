@@ -9,7 +9,12 @@ import type { BotConfig } from '@co-working-call/shared';
 import { loadConfig, saveConfig } from '../config/index.js';
 import { buildStartEmbedMessage } from '../embed/index.js';
 import type { VoiceSession } from '../voice/session-registry.js';
-import { hasAdminRole, isVoiceTextContext, missingBotPermissions } from './checks.js';
+import {
+  buildAllowedRoleNames,
+  hasAnyAdminRole,
+  isVoiceTextContext,
+  missingBotPermissions,
+} from './checks.js';
 
 /** config 未存在時の初期タイマー設定 (commands-spec モーダル placeholder: 25/5/4/15 分)。 */
 const DEFAULT_TIMER: BotConfig['default'] = {
@@ -21,6 +26,11 @@ const DEFAULT_TIMER: BotConfig['default'] = {
 
 /** VC 内蔵テキスト欄以外で /pomo 系コマンドを実行したときの共通エラー文言。 */
 const VC_TEXT_ONLY_MESSAGE = 'このコマンドはボイスチャンネル内のテキスト欄で実行してください';
+
+/** 権限不足時の共通エラー文言 (許可ロールを列挙)。 */
+function adminRoleRequiredMessage(allowedRoleNames: readonly string[]): string {
+  return `このコマンドの実行には ${allowedRoleNames.join(' / ')} のいずれかのロールが必要です`;
+}
 
 export const pomoCommand = new SlashCommandBuilder()
   .setName('pomo')
@@ -35,6 +45,28 @@ export const pomoCommand = new SlashCommandBuilder()
   )
   .addSubcommand((sub) =>
     sub.setName('join').setDescription('bot を VC に再入室させる (タイマーは開始しない)'),
+  )
+  .addSubcommandGroup((group) =>
+    group
+      .setName('admin-role')
+      .setDescription('コマンド実行を許可する追加ロールの管理')
+      .addSubcommand((sub) =>
+        sub
+          .setName('add')
+          .setDescription('許可ロールを追加する')
+          .addRoleOption((opt) =>
+            opt.setName('role').setDescription('追加するロール').setRequired(true),
+          ),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('remove')
+          .setDescription('追加した許可ロールを外す')
+          .addRoleOption((opt) =>
+            opt.setName('role').setDescription('外すロール').setRequired(true),
+          ),
+      )
+      .addSubcommand((sub) => sub.setName('list').setDescription('現在の許可ロール一覧を表示する')),
   );
 
 /**
@@ -63,11 +95,13 @@ export async function handlePomoInit(
     const existing = await loadConfig(configPath);
     const existingConfig = existing.status === 'ok' ? existing.config : null;
     const adminRoleName = existingConfig?.adminRoleName ?? 'pomo-admin';
+    const adminRoleNames = existingConfig?.adminRoleNames ?? [];
+    const allowedRoles = buildAllowedRoleNames(adminRoleName, adminRoleNames);
 
     const member = await guild.members.fetch(interaction.user.id);
     const roleNames = member.roles.cache.map((role) => role.name);
-    if (!hasAdminRole(roleNames, adminRoleName)) {
-      await interaction.editReply(`このコマンドの実行には ${adminRoleName} ロールが必要です`);
+    if (!hasAnyAdminRole(roleNames, allowedRoles)) {
+      await interaction.editReply(adminRoleRequiredMessage(allowedRoles));
       return;
     }
 
@@ -96,6 +130,7 @@ export async function handlePomoInit(
       guildId: guild.id,
       voiceChannelId: channel.id,
       adminRoleName,
+      adminRoleNames,
     };
     await saveConfig(configPath, config);
     await channel.send(buildStartEmbedMessage(config));
@@ -150,10 +185,12 @@ export async function handlePomoStop(
 
     const member = await guild.members.fetch(interaction.user.id);
     const roleNames = member.roles.cache.map((role) => role.name);
-    if (!hasAdminRole(roleNames, session.config.adminRoleName)) {
-      await interaction.editReply(
-        `このコマンドの実行には ${session.config.adminRoleName} ロールが必要です`,
-      );
+    const allowedRoles = buildAllowedRoleNames(
+      session.config.adminRoleName,
+      session.config.adminRoleNames,
+    );
+    if (!hasAnyAdminRole(roleNames, allowedRoles)) {
+      await interaction.editReply(adminRoleRequiredMessage(allowedRoles));
       return;
     }
 
@@ -214,10 +251,12 @@ export async function handlePomoJoin(
 
     const member = await guild.members.fetch(interaction.user.id);
     const roleNames = member.roles.cache.map((role) => role.name);
-    if (!hasAdminRole(roleNames, session.config.adminRoleName)) {
-      await interaction.editReply(
-        `このコマンドの実行には ${session.config.adminRoleName} ロールが必要です`,
-      );
+    const allowedRoles = buildAllowedRoleNames(
+      session.config.adminRoleName,
+      session.config.adminRoleNames,
+    );
+    if (!hasAnyAdminRole(roleNames, allowedRoles)) {
+      await interaction.editReply(adminRoleRequiredMessage(allowedRoles));
       return;
     }
 
@@ -245,6 +284,103 @@ export async function handlePomoJoin(
       } else {
         await interaction.reply({
           content: '再入室処理に失敗しました。ログを確認してください',
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+    } catch (replyErr) {
+      logger.error({ err: replyErr }, 'エラー応答にも失敗しました');
+    }
+  }
+}
+
+/**
+ * /pomo admin-role (add/remove/list) ハンドラ。
+ * コマンド実行を許可する追加ロール (config.adminRoleNames) を GUI のロール選択で管理する。
+ * 基準ロール (adminRoleName, 既定 pomo-admin) は常に許可で、ここでは外せない。
+ * 変更は config.json 保存に加え、稼働中セッションへも即反映する (再起動不要)。
+ */
+export async function handleAdminRole(
+  interaction: ChatInputCommandInteraction,
+  session: VoiceSession | undefined,
+  configPath: string,
+  logger: Logger,
+): Promise<void> {
+  try {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    if (!isVoiceTextContext(interaction.channel?.type)) {
+      await interaction.editReply(VC_TEXT_ONLY_MESSAGE);
+      return;
+    }
+    if (!session) {
+      await interaction.editReply(
+        'セットアップが必要です。/pomo init 実行後に bot を再起動してください',
+      );
+      return;
+    }
+    const guild = interaction.guild;
+    if (!guild) {
+      await interaction.editReply('サーバー内で実行してください');
+      return;
+    }
+
+    const member = await guild.members.fetch(interaction.user.id);
+    const roleNames = member.roles.cache.map((role) => role.name);
+    const allowedRoles = buildAllowedRoleNames(
+      session.config.adminRoleName,
+      session.config.adminRoleNames,
+    );
+    if (!hasAnyAdminRole(roleNames, allowedRoles)) {
+      await interaction.editReply(adminRoleRequiredMessage(allowedRoles));
+      return;
+    }
+
+    const action = interaction.options.getSubcommand();
+    if (action === 'list') {
+      await interaction.editReply(`現在の許可ロール: ${allowedRoles.join(' / ')}`);
+      return;
+    }
+
+    // add / remove: 最新 config を基に adminRoleNames を更新し、保存 + セッションへ即反映。
+    const loaded = await loadConfig(configPath);
+    const base = loaded.status === 'ok' ? loaded.config : session.config;
+    const role = interaction.options.getRole('role', true);
+    const names = new Set(base.adminRoleNames);
+
+    if (action === 'add') {
+      if (role.name === base.adminRoleName || names.has(role.name)) {
+        await interaction.editReply(`「${role.name}」は既に許可されています`);
+        return;
+      }
+      names.add(role.name);
+    } else {
+      if (role.name === base.adminRoleName) {
+        await interaction.editReply(`「${role.name}」は基準ロールのため外せません`);
+        return;
+      }
+      if (!names.has(role.name)) {
+        await interaction.editReply(`「${role.name}」は許可ロールに登録されていません`);
+        return;
+      }
+      names.delete(role.name);
+    }
+
+    const updated: BotConfig = { ...base, adminRoleNames: [...names] };
+    await saveConfig(configPath, updated);
+    session.config = updated; // 稼働中セッションへ即反映 (再起動不要)
+
+    const verb = action === 'add' ? '追加' : '削除';
+    const current = buildAllowedRoleNames(updated.adminRoleName, updated.adminRoleNames);
+    await interaction.editReply(`許可ロールを${verb}しました。現在: ${current.join(' / ')}`);
+    logger.info({ guildId: guild.id, action, role: role.name }, '/pomo admin-role 実行');
+  } catch (err) {
+    logger.error({ err }, '/pomo admin-role 処理に失敗しました');
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply('ロール設定の更新に失敗しました。ログを確認してください');
+      } else {
+        await interaction.reply({
+          content: 'ロール設定の更新に失敗しました。ログを確認してください',
           flags: MessageFlags.Ephemeral,
         });
       }
