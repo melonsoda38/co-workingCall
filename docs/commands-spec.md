@@ -2,7 +2,7 @@
 
 ## 概要
 このbotがユーザーに提供する操作インターフェースの仕様。
-- スラッシュコマンド: /pomo init のみ (初期セットアップ用)
+- スラッシュコマンド: /pomo init (初期セットアップ用) と /pomo stop・/pomo join (テスト用)
 - Embedボタン: 通常運用の操作
 - Modal: 設定変更
 
@@ -68,6 +68,23 @@
 - スラッシュコマンドは 3秒以内に応答必須
 - 処理に時間がかかる可能性があるので deferReply() で延長
 - 完了したら editReply() で最終応答
+
+### /pomo stop (テスト用)
+動作中のタイマーを強制停止し、bot を VC から退出させてスタート Embed に戻す。
+- 実行場所: VC内蔵テキスト欄でのみ (それ以外は /pomo init と同じエラー文言で拒否)
+- 権限: adminRoleName (pomo-admin) ロール
+- 動作: timer.stop() → VoiceManager.forceDisconnect() (VC退出) → EmbedManager.onIdle()
+- タイマー設定 (config.json) は保持する (リセットしない)
+- 成功時は確認メッセージを出さない (deferReply → deleteReply の無言確認)
+
+### /pomo join (テスト用)
+bot を対象 VC へ再入室させる (タイマーは開始しない)。/pomo stop で退出後、
+VC に居たまま bot を呼び戻す用途。
+- 実行場所: VC内蔵テキスト欄でのみ (それ以外は /pomo init と同じエラー文言で拒否)
+- 権限: adminRoleName (pomo-admin) ロール
+- 既に bot が VC に入室済みの場合は何もせず、実行者にのみ ephemeral でエラー通知
+- 未接続なら VoiceManager.ensureConnected() で接続
+- 成功時は確認メッセージを出さない (bot が VC に現れることで分かる)
 
 ## Embedボタン
 

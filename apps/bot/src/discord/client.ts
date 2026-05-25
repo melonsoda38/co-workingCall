@@ -3,6 +3,7 @@ import type { Logger } from 'pino';
 import {
   SETTINGS_MODAL_ID,
   handlePomoInit,
+  handlePomoJoin,
   handlePomoStop,
   handleSettingsButton,
   handleSettingsModalSubmit,
@@ -71,6 +72,9 @@ export async function startBot(token: string, logger: Logger, configPath: string
         } else if (sub === 'stop') {
           const session = interaction.guildId ? sessions.get(interaction.guildId) : undefined;
           void handlePomoStop(interaction, session, logger);
+        } else if (sub === 'join') {
+          const session = interaction.guildId ? sessions.get(interaction.guildId) : undefined;
+          void handlePomoJoin(interaction, session, logger);
         }
       }
       return;
