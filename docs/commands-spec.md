@@ -2,7 +2,7 @@
 
 ## 概要
 このbotがユーザーに提供する操作インターフェースの仕様。
-- スラッシュコマンド: /pomo init (初期セットアップ用) と /pomo stop・/pomo join (テスト用)
+- スラッシュコマンド: /pomo init (初期セットアップ)、/pomo stop・/pomo join (テスト用)、/pomo admin-role (許可ロール管理)
 - Embedボタン: 通常運用の操作
 - Modal: 設定変更
 
@@ -85,6 +85,16 @@ VC に居たまま bot を呼び戻す用途。
 - 既に bot が VC に入室済みの場合は何もせず、実行者にのみ ephemeral でエラー通知
 - 未接続なら VoiceManager.ensureConnected() で接続
 - 成功時は確認メッセージを出さない (bot が VC に現れることで分かる)
+
+### /pomo admin-role add / remove / list
+コマンド実行を許可する追加ロールを GUI のロール選択で管理する。
+- 実行場所: VC内蔵テキスト欄でのみ。権限: 現在の許可ロールのいずれか
+- 許可ロール = 基準ロール `adminRoleName` (既定 pomo-admin、常に許可・外せない) +
+  追加ロール `adminRoleNames` (config.json)
+- `add role:@ロール` … 追加許可ロールに足す / `remove role:@ロール` … 外す /
+  `list` … 現在の許可ロール一覧を表示
+- ロールは「名前」で保存 (現行の名前一致方式に合わせる。ロール改名時は再登録が必要)
+- 変更は config.json 保存に加え、稼働中セッションへも即反映 (再起動不要)
 
 ## Embedボタン
 
