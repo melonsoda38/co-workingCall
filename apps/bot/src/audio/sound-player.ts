@@ -116,6 +116,7 @@ export class SoundPlayer implements PhaseSoundNotifier {
       return;
     }
     try {
+      this.#logger.debug({ key, filePath }, '通知音を再生します');
       const resource = this.#createResource(filePath);
       this.#player.play(resource); // 多重再生は上書き (audio-spec)
     } catch (err) {
