@@ -56,8 +56,7 @@ newState: 変更後の VoiceState
 ```
 1. 1分カウントダウンタイマーが起動中ならキャンセル
 2. bot がまだVCに接続していなければ joinVoiceChannel()
-3. 接続成功 → 入室メッセージ送信 (VC内蔵テキスト欄)
-4. AudioPlayer を初期化、connection.subscribe(player)
+3. AudioPlayer を初期化、connection.subscribe(player)
 ```
 
 ### 人間1人以上 → ゼロ
@@ -85,13 +84,10 @@ newState: 変更後の VoiceState
 
 ## 入室メッセージ
 
-bot自動入室時にVC内蔵テキスト欄に送るメッセージ。
+入室メッセージは送信しない (運用判断により廃止)。
 
-- 投稿はSuppressNotifications フラグ付き
-- 内容は `apps/bot/src/messages.ts` に定数として定義
-- 実装時に決定 (例: "こんにちは 👋" 等)
-
-退出時はメッセージ送信しない (静かに退出)。
+bot自動入室時・退出時ともにVC内蔵テキスト欄へのメッセージ送信は行わず、静かに入退室する。
+(以前は入室時に固定文言を投稿していたが、不要との判断で削除した。)
 
 ## タイマー終了処理中の特別扱い
 
