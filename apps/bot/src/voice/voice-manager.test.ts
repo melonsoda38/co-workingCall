@@ -28,17 +28,15 @@ function setup(opts?: { connectNull?: boolean; phase?: TimerSnapshot['phase'] })
   );
   const soundPlayer = { init: vi.fn(), stop: vi.fn() };
   const timer = { getSnapshot: vi.fn(() => snapshot(opts?.phase ?? 'idle')), stop: vi.fn() };
-  const sendEntryMessage = vi.fn();
   const resetToIdle = vi.fn<() => Promise<void>>(() => Promise.resolve());
   const vm = new VoiceManager({
     logger,
     soundPlayer,
     timer,
     connect,
-    sendEntryMessage,
     resetToIdle,
   });
-  return { vm, connect, connection, destroy, soundPlayer, timer, sendEntryMessage, resetToIdle };
+  return { vm, connect, connection, destroy, soundPlayer, timer, resetToIdle };
 }
 
 describe('classifyHumanCountTransition', () => {
@@ -77,20 +75,18 @@ describe('VoiceManager', () => {
     vi.useRealTimers();
   });
 
-  it('0→1+ で接続し SoundPlayer を init・入室メッセージを送る', async () => {
-    const { vm, connect, connection, soundPlayer, sendEntryMessage } = setup();
+  it('0→1+ で接続し SoundPlayer を init する', async () => {
+    const { vm, connect, connection, soundPlayer } = setup();
     await vm.handleHumanCountChange(1);
     expect(connect).toHaveBeenCalledTimes(1);
     expect(soundPlayer.init).toHaveBeenCalledWith(connection);
-    expect(sendEntryMessage).toHaveBeenCalledTimes(1);
     expect(vm.connected).toBe(true);
   });
 
   it('接続失敗 (null) なら init せず connected は false のまま', async () => {
-    const { vm, soundPlayer, sendEntryMessage } = setup({ connectNull: true });
+    const { vm, soundPlayer } = setup({ connectNull: true });
     await vm.handleHumanCountChange(1);
     expect(soundPlayer.init).not.toHaveBeenCalled();
-    expect(sendEntryMessage).not.toHaveBeenCalled();
     expect(vm.connected).toBe(false);
   });
 
@@ -152,5 +148,30 @@ describe('VoiceManager', () => {
 
     await vi.advanceTimersByTimeAsync(60_000);
     expect(destroy).toHaveBeenCalledTimes(1); // CD は発火しない
+  });
+
+  it('ensureConnected: 未接続なら接続+init し true', async () => {
+    const { vm, connect, connection, soundPlayer } = setup();
+    const ok = await vm.ensureConnected();
+    expect(ok).toBe(true);
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(soundPlayer.init).toHaveBeenCalledWith(connection);
+    expect(vm.connected).toBe(true);
+  });
+
+  it('ensureConnected: 接続済みなら再接続せず true', async () => {
+    const { vm, connect } = setup();
+    await vm.handleHumanCountChange(1); // 自動入室で接続済みに
+    expect(connect).toHaveBeenCalledTimes(1);
+    const ok = await vm.ensureConnected();
+    expect(ok).toBe(true);
+    expect(connect).toHaveBeenCalledTimes(1); // 再接続しない
+  });
+
+  it('ensureConnected: 接続失敗なら false', async () => {
+    const { vm } = setup({ connectNull: true });
+    const ok = await vm.ensureConnected();
+    expect(ok).toBe(false);
+    expect(vm.connected).toBe(false);
   });
 });

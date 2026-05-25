@@ -158,6 +158,37 @@ describe('EmbedManager', () => {
   });
 });
 
+describe('EmbedManager.adoptStartEmbed / applyConfig (▶開始結線)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('adoptStartEmbed した外部スタート Embed を初回 work で削除対象にする', async () => {
+    const { channel, del } = fakeChannel();
+    const timer = new FakeTimer();
+    const m = new EmbedManager({ channel, timer, config, logger });
+    m.adoptStartEmbed('external-start');
+    expect(m.startEmbedId).toBe('external-start');
+
+    timer.emit('phaseChange', makeSnapshot('work'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(del).toHaveBeenCalledWith('external-start');
+    expect(m.startEmbedId).toBeNull();
+  });
+
+  it('applyConfig は Discord 通信なしで config を差し替える', () => {
+    const { channel, post, edit } = fakeChannel();
+    const m = new EmbedManager({ channel, timer: new FakeTimer(), config, logger });
+    const next: BotConfig = { ...config, default: { ...config.default, workSec: 60 } };
+    m.applyConfig(next);
+    expect(post).not.toHaveBeenCalled();
+    expect(edit).not.toHaveBeenCalled();
+  });
+});
+
 describe('EmbedManager フェーズ切替の通知音 (US-11)', () => {
   beforeEach(() => {
     vi.useFakeTimers();

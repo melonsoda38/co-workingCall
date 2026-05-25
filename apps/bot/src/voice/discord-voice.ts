@@ -4,8 +4,8 @@ import type { Logger } from 'pino';
 import type { BotConfig } from '@co-working-call/shared';
 import { createDiscordSoundPlayer } from '../audio/index.js';
 import { createDiscordEmbedChannel } from '../discord/discord-embed-channel.js';
-import { buildEntryMessageOptions } from '../messages.js';
 import { createPomodoroSession } from '../session/index.js';
+import type { VoiceSessionRegistry } from './session-registry.js';
 import { VoiceManager, isTargetVcEvent, type VoiceConnectionHandle } from './voice-manager.js';
 
 /** VC の人間 (非 bot) メンバー数を数える (voice-spec)。 */
@@ -13,21 +13,19 @@ export function countHumans(channel: VoiceChannel): number {
   return channel.members.filter((member) => !member.user.bot).size;
 }
 
-/** 入室メッセージを VC 内蔵テキスト欄へ送る (失敗してもログのみ、接続は維持)。 */
-function postEntryMessage(channel: VoiceChannel, logger: Logger): void {
-  void channel.send(buildEntryMessageOptions()).catch((err: unknown) => {
-    logger.error({ err }, '入室メッセージの送信に失敗しました');
-  });
-}
-
 /** 対象 VC へ接続する。失敗時は null (リトライしない: voice-spec)。 */
 function connectToVc(channel: VoiceChannel, logger: Logger): VoiceConnectionHandle | null {
   try {
-    return joinVoiceChannel({
+    const connection = joinVoiceChannel({
       channelId: channel.id,
       guildId: channel.guild.id,
       adapterCreator: channel.guild.voiceAdapterCreator,
     });
+    // VoiceConnection の 'error' は未処理だと例外で落ちうる。必ず捕捉してログに残す。
+    connection.on('error', (err) => {
+      logger.error({ err: err.message }, 'VoiceConnection エラー');
+    });
+    return connection;
   } catch (err) {
     logger.error({ err }, 'joinVoiceChannel に失敗しました');
     return null;
@@ -61,12 +59,14 @@ function handleVoiceStateUpdate(
 /**
  * config 有効時に VC 自動入退室機能を結線する (US-16)。
  * 対象 VC を解決し、SoundPlayer・セッション・VoiceManager を構築して
- * voiceStateUpdate を購読する。▶開始ボタン等の結線は後続の全体結線で行う。
+ * voiceStateUpdate を購読する。構築したセッションは registry に登録し、
+ * ▶開始ボタン等の interaction ハンドラから参照できるようにする。
  */
 export async function setupVoiceFeature(
   client: Client<true>,
   config: BotConfig,
   logger: Logger,
+  sessions: VoiceSessionRegistry,
 ): Promise<void> {
   const channel = await client.channels.fetch(config.voiceChannelId);
   if (channel?.type !== ChannelType.GuildVoice) {
@@ -89,14 +89,19 @@ export async function setupVoiceFeature(
     soundPlayer,
     timer: session.timer,
     connect: () => Promise.resolve(connectToVc(channel, logger)),
-    sendEntryMessage: () => {
-      postEntryMessage(channel, logger);
-    },
     resetToIdle: () => session.embedManager.onIdle(),
   });
 
   client.on(Events.VoiceStateUpdate, (oldState, newState) => {
     handleVoiceStateUpdate(oldState, newState, channel, config.voiceChannelId, voiceManager);
+  });
+
+  // ▶開始ボタン等から参照できるよう、ギルド単位でセッションを登録する。
+  sessions.set(config.guildId, {
+    config,
+    timer: session.timer,
+    embedManager: session.embedManager,
+    voiceManager,
   });
 
   // 起動時点の人間数を反映 (既に人がいれば入室する)。

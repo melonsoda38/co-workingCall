@@ -26,8 +26,14 @@ export function createDiscordSoundPlayer(logger: Logger, soundsDir?: string): So
   return new SoundPlayer({
     logger,
     soundsDir,
-    createPlayer: () =>
-      createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } }),
+    createPlayer: () => {
+      const player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
+      // AudioPlayer の 'error' は未処理だと例外で落ちうる。必ず捕捉してログに残す。
+      player.on('error', (err) => {
+        logger.error({ err: err.message }, 'AudioPlayer エラー');
+      });
+      return player;
+    },
     createResource: (filePath) =>
       createAudioResource(filePath, { inputType: StreamType.Arbitrary }),
   });
