@@ -101,13 +101,15 @@ export class EmbedManager {
     return this.#timerEmbedId;
   }
 
-  /** idle: スタート用 Embed を投稿 (タイマー用が残っていれば削除)。 */
+  /** idle: スタート用 Embed を投稿 (タイマー用・既存スタート用が残っていれば削除)。 */
   async onIdle(): Promise<void> {
     this.#updater?.stop();
     this.#updater = null;
     this.#debouncer.cancel();
     this.#currentPhase = 'idle';
     await this.#deleteTimerEmbed();
+    // 既存スタート Embed を消してから出し直す (/pomo stop の重複投稿防止・冪等化)。
+    await this.#deleteStartEmbed();
     const posted = await this.#channel.post(buildStartEmbedMessage(this.#config));
     this.#startEmbedId = posted.id;
   }

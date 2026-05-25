@@ -3,6 +3,7 @@ import type { Logger } from 'pino';
 import {
   SETTINGS_MODAL_ID,
   handlePomoInit,
+  handlePomoStop,
   handleSettingsButton,
   handleSettingsModalSubmit,
   handleStartButton,
@@ -63,11 +64,14 @@ export async function startBot(token: string, logger: Logger, configPath: string
 
   client.on(Events.InteractionCreate, (interaction) => {
     if (interaction.isChatInputCommand()) {
-      if (
-        interaction.commandName === 'pomo' &&
-        interaction.options.getSubcommand(false) === 'init'
-      ) {
-        void handlePomoInit(interaction, configPath, logger);
+      if (interaction.commandName === 'pomo') {
+        const sub = interaction.options.getSubcommand(false);
+        if (sub === 'init') {
+          void handlePomoInit(interaction, configPath, logger);
+        } else if (sub === 'stop') {
+          const session = interaction.guildId ? sessions.get(interaction.guildId) : undefined;
+          void handlePomoStop(interaction, session, logger);
+        }
       }
       return;
     }
