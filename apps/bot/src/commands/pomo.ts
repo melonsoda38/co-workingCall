@@ -8,6 +8,7 @@ import type { Logger } from 'pino';
 import type { BotConfig } from '@co-working-call/shared';
 import { loadConfig, saveConfig } from '../config/index.js';
 import { buildStartEmbedMessage } from '../embed/index.js';
+import type { VoiceSession } from '../voice/session-registry.js';
 import { hasAdminRole, missingBotPermissions } from './checks.js';
 
 /** config 未存在時の初期タイマー設定 (commands-spec モーダル placeholder: 25/5/4/15 分)。 */
@@ -23,6 +24,11 @@ export const pomoCommand = new SlashCommandBuilder()
   .setDescription('ポモドーロ bot のセットアップ')
   .addSubcommand((sub) =>
     sub.setName('init').setDescription('このボイスチャンネルでセットアップ/復旧する'),
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName('stop')
+      .setDescription('タイマーを強制停止してスタート画面に戻す (設定は保持・テスト用)'),
   );
 
 /**
@@ -98,6 +104,66 @@ export async function handlePomoInit(
       } else {
         await interaction.reply({
           content: 'セットアップに失敗しました。ログを確認してください',
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+    } catch (replyErr) {
+      logger.error({ err: replyErr }, 'エラー応答にも失敗しました');
+    }
+  }
+}
+
+/**
+ * /pomo stop ハンドラ (テスト用)。タイマーを強制停止しスタート Embed に戻す。
+ * タイマー設定 (config.json) はリセットしない。実行権限は pomo-admin ロール。
+ * セッションは guildId で VoiceSessionRegistry から解決して渡す。
+ */
+export async function handlePomoStop(
+  interaction: ChatInputCommandInteraction,
+  session: VoiceSession | undefined,
+  logger: Logger,
+): Promise<void> {
+  try {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    if (!session) {
+      await interaction.editReply(
+        'セットアップが必要です。/pomo init 実行後に bot を再起動してください',
+      );
+      return;
+    }
+    const guild = interaction.guild;
+    if (!guild) {
+      await interaction.editReply('サーバー内で実行してください');
+      return;
+    }
+
+    const member = await guild.members.fetch(interaction.user.id);
+    const roleNames = member.roles.cache.map((role) => role.name);
+    if (!hasAdminRole(roleNames, session.config.adminRoleName)) {
+      await interaction.editReply(
+        `このコマンドの実行には ${session.config.adminRoleName} ロールが必要です`,
+      );
+      return;
+    }
+
+    // 強制停止 → VC 退出 → スタート Embed 表示。設定は保持 (timer.stop は config.json を触らない)。
+    session.timer.stop();
+    session.voiceManager.forceDisconnect();
+    await session.embedManager.onIdle();
+
+    // 成功時は確認メッセージを出さない (結果はスタート Embed 再表示で分かる)。
+    // 3 秒以内の応答義務を満たすため defer 済みの ephemeral 応答は削除する。
+    await interaction.deleteReply();
+    logger.info({ guildId: guild.id }, '/pomo stop 実行');
+  } catch (err) {
+    logger.error({ err }, '/pomo stop 処理に失敗しました');
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply('停止処理に失敗しました。ログを確認してください');
+      } else {
+        await interaction.reply({
+          content: '停止処理に失敗しました。ログを確認してください',
           flags: MessageFlags.Ephemeral,
         });
       }

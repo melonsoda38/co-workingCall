@@ -109,16 +109,8 @@
 
 ### 作業中タイマー用Embedのボタン
 
-#### [⚙] (Disabled)
-- custom_id: 'pomo_settings_open_disabled'
-- スタイル: Secondary
-- 絵文字: ⚙
-- disabled: true (作業中は変更不可)
-
-押下時の動作:
-- 押せない (disabled なので)
-- ホバー時に「作業中は設定変更できません」と表示
-  (Discord クライアントが自動で表示する標準動作)
+ボタンは置かない (設定アイコンは廃止)。作業中タイマー Embed は表示専用とする。
+(以前は無効化した設定アイコンを置いていたが、運用判断で削除した。)
 
 ## タイマー設定モーダル
 
@@ -187,7 +179,6 @@
 |---|---|
 | pomo_start | 作業スタート用Embedの開始ボタン |
 | pomo_settings_open | 作業スタート用Embedの設定ボタン |
-| pomo_settings_open_disabled | 作業中タイマー用Embedの設定ボタン (無効) |
 | pomo_settings_modal | 設定モーダル本体 (送信識別用) |
 
 custom_id は変更すると過去のインタラクションが動かなくなるので注意。

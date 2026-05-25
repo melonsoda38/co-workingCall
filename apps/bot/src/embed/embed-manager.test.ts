@@ -105,6 +105,15 @@ describe('EmbedManager', () => {
     expect(m.startEmbedId).toBe('m1');
   });
 
+  it('onIdle 再実行は既存スタート Embed を削除してから出し直す (冪等)', async () => {
+    const { channel, del } = fakeChannel();
+    const m = new EmbedManager({ channel, timer: new FakeTimer(), config, logger });
+    await m.onIdle(); // m1
+    await m.onIdle(); // m1 削除 → m2
+    expect(del).toHaveBeenCalledWith('m1');
+    expect(m.startEmbedId).toBe('m2');
+  });
+
   it('phaseChange: 初回 work で start削除→timer投稿、work→break で再投稿', async () => {
     const { channel, del } = fakeChannel();
     const timer = new FakeTimer();

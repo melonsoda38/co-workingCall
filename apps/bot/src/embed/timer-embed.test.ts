@@ -1,19 +1,7 @@
-import {
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  EmbedBuilder,
-  MessageFlags,
-} from 'discord.js';
+import { EmbedBuilder, MessageFlags } from 'discord.js';
 import { describe, expect, it } from 'vitest';
 import type { BotConfig, TimerSnapshot } from '@co-working-call/shared';
-import {
-  DISABLED_SETTINGS_BUTTON_ID,
-  buildTimerEmbedMessage,
-  formatRemaining,
-  phaseLabel,
-  progressBar,
-} from './timer-embed.js';
+import { buildTimerEmbedMessage, formatRemaining, phaseLabel, progressBar } from './timer-embed.js';
 
 const config: BotConfig = {
   default: { workSec: 1500, breakSec: 300, sets: 4, finalBreakSec: 900 },
@@ -64,7 +52,7 @@ describe('phaseLabel', () => {
 });
 
 describe('buildTimerEmbedMessage', () => {
-  it('work: タイトル/フェーズ/残り/フッター/disabled ボタン/フラグ', () => {
+  it('work: タイトル/フェーズ/残り/フッター/フラグ、ボタンは無し', () => {
     const msg = buildTimerEmbedMessage(snap({ phase: 'work', remainingMs: 90_000 }), config);
     const embed = msg.embeds?.[0];
     expect(embed).toBeInstanceOf(EmbedBuilder);
@@ -75,14 +63,8 @@ describe('buildTimerEmbedMessage', () => {
     expect(json.footer?.text).toBe('作業25分 / 休憩5分 / 4セット / 最終休憩15分');
     expect(msg.flags).toBe(MessageFlags.SuppressNotifications);
 
-    const row = msg.components?.[0];
-    expect(row).toBeInstanceOf(ActionRowBuilder);
-    const rjson = (row as ActionRowBuilder<ButtonBuilder>).toJSON();
-    expect(rjson.components[0]).toMatchObject({
-      custom_id: DISABLED_SETTINGS_BUTTON_ID,
-      style: ButtonStyle.Secondary,
-      disabled: true,
-    });
+    // 設定アイコン (無効化ボタン) は廃止: components は持たない。
+    expect(msg.components ?? []).toHaveLength(0);
   });
 
   it('countdown: 残りは ── 固定でバー満杯', () => {

@@ -1,7 +1,4 @@
 import {
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   EmbedBuilder,
   MessageFlags,
   type BaseMessageOptions,
@@ -9,8 +6,6 @@ import {
 } from 'discord.js';
 import type { BotConfig, TimerSnapshot } from '@co-working-call/shared';
 import { formatConfigSummary } from './start-embed.js';
-
-export const DISABLED_SETTINGS_BUTTON_ID = 'pomo_settings_open_disabled';
 
 /** 残りミリ秒を MM:SS に整形する (負値は 00:00)。 */
 export function formatRemaining(ms: number): string {
@@ -86,15 +81,8 @@ export function buildTimerEmbedContent(
     .setDescription(`${phaseLabel(snapshot)}\n残り ${remaining}\n${progressBar(ratio)}`)
     .setFooter({ text: formatConfigSummary(config) });
 
-  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId(DISABLED_SETTINGS_BUTTON_ID)
-      .setStyle(ButtonStyle.Secondary)
-      .setEmoji('⚙️')
-      .setDisabled(true),
-  );
-
-  return { embeds: [embed], components: [row] };
+  // 作業中タイマー Embed にはボタンを置かない (設定アイコンは廃止)。
+  return { embeds: [embed] };
 }
 
 /** 作業中タイマー用 Embed メッセージ (新規投稿用。SuppressNotifications 付き)。 */
