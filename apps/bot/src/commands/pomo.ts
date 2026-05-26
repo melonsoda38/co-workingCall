@@ -18,11 +18,11 @@ import {
   missingBotPermissions,
 } from './checks.js';
 
-/** config 未存在時の初期タイマー設定 (commands-spec モーダル placeholder: 25/5/4/15 分)。 */
+/** config 未存在時の初期タイマー設定 (commands-spec モーダル placeholder: 50/10/2/15 分)。 */
 const DEFAULT_TIMER: BotConfig['default'] = {
-  workSec: 25 * 60,
-  breakSec: 5 * 60,
-  sets: 4,
+  workSec: 50 * 60,
+  breakSec: 10 * 60,
+  sets: 2,
   finalBreakSec: 15 * 60,
 };
 
