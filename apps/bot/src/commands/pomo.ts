@@ -140,7 +140,11 @@ export async function handlePomoInit(
     // 新規スタート Embed 投稿の直前に、対象 VC テキスト欄から bot 自身の過去 Embed を掃除
     // (init 連打や前回起動の追跡漏れも含めてテキスト欄を 1 Embed に保つ)。
     await purgeOwnEmbeds(channel, interaction.client.user.id, logger);
-    await channel.send(buildStartEmbedMessage(config));
+    const startEmbedMessage = await channel.send(buildStartEmbedMessage(config));
+    // 投稿した Start Embed の id を EmbedManager に取り込む (session 結線済みの場合)。
+    // これをやらないと EmbedManager.#startEmbedId が null のままで、
+    // ▶開始 / 設定モーダル保存後の repostStartEmbed が早期 return してしまう。
+    session?.embedManager.adoptStartEmbed(startEmbedMessage.id);
 
     // 稼働中セッションがあれば bot を VC に入室させる (旧 /pomo join 相当)。
     // session が無い場合 (初回 init・setupVoiceFeature 未実行) は bot 再起動が必要。
