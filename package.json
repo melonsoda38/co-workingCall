@@ -8,6 +8,7 @@
     "node": ">=22.12"
   },
   "scripts": {
+    "start": "./scripts/start-bot.sh",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
