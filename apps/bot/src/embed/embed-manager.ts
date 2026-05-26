@@ -62,6 +62,12 @@ export interface TimerLike {
     event: 'phaseChange' | 'countdown' | 'ended',
     listener: (snapshot: TimerSnapshot) => void,
   ): unknown;
+  /**
+   * タイマー内部状態を idle に戻す。終了演出の SessionState リセット工程で呼ぶ。
+   * 自然 ended では PomodoroTimer は phase='ended' と #startedAt を保持する設計のため、
+   * これを呼ばないと次の ▶開始ボタンで getSnapshot().phase !== 'idle' に弾かれる。
+   */
+  reset(): void;
 }
 
 export interface EmbedManagerDeps {
@@ -255,7 +261,12 @@ export class EmbedManager {
           'お疲れさま投稿の削除に失敗 (best-effort)',
         );
       }
-      // 8. SessionState 相当のリセット (timer は ended で停止済み、updater/debouncer も既にクリア済み)。
+      // 8. SessionState 相当のリセット。
+      //    PomodoroTimer は ended 到達で interval は停止するが #startedAt/#currentPhase='ended' を
+      //    保持する設計のため、明示的に reset() を呼ばないと次の ▶開始で
+      //    getSnapshot().phase !== 'idle' に弾かれて「すでに動作中」と誤判定される。
+      //    updater/debouncer は既にクリア済み。
+      this.#timer.reset();
       this.#currentPhase = 'idle';
       // 9. 新スタート Embed 投稿 → idle に戻る。
       const posted = await this.#postFresh(buildStartEmbedMessage(this.#config));

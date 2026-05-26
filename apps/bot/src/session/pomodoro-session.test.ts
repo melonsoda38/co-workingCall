@@ -89,4 +89,28 @@ describe('createPomodoroSession (US-15 フェーズ切替音の統合)', () => {
     expect(session.timer).toBeDefined();
     expect(session.embedManager).toBeDefined();
   });
+
+  it('自然 ended 後に timer.getSnapshot().phase が idle に戻る (再開ボタンの早期 return を防ぐ)', async () => {
+    const { soundPlayer } = fakeSoundPlayer();
+    // ended まで素早く到達するよう finalBreakSec を 11 秒 (countdown 10 秒 + 本体 1 秒) に縮める。
+    const fastConfig: BotConfig = {
+      ...config,
+      default: { workSec: 1, breakSec: 1, sets: 2, finalBreakSec: 11 },
+    };
+    const session = createPomodoroSession({
+      channel: fakeChannel(),
+      config: fastConfig,
+      logger,
+      soundPlayer,
+    });
+
+    await session.embedManager.onIdle();
+    session.timer.start(fastConfig.default);
+    // work(1) 1s + break(1) 1s + work(2) 1s + finalBreak 1s + countdown 10s = 14s で ended。
+    await vi.advanceTimersByTimeAsync(14_000);
+    // ending フロー (3 秒余韻含む) の完了まで進める。
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(session.timer.getSnapshot().phase).toBe('idle');
+  });
 });
