@@ -185,7 +185,7 @@ export class VoiceManager {
     const phase = this.#timer.getSnapshot().phase;
 
     // US-20: タイマー実行中なら US-19 の終了演出フローを発動する (ending-spec §VC人間ゼロ起因)。
-    // triggerEndingFlow 内で timer.stop + finish.mp3 + お疲れさま投稿 + 4秒待機 +
+    // triggerEndingFlow 内で timer.stop + finish.mp3 + お疲れさま投稿 + 3秒待機 +
     // VC全員強制退出 + bot退出 + 新スタートEmbed + idle 復帰 まで一括で実行する。
     if (isTimerRunning(phase) && this.#triggerEndingFlow) {
       try {

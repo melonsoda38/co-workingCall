@@ -8,7 +8,7 @@ Discord ボイスチャンネル上で動作するポモドーロタイマー bo
 - VC 内蔵テキスト欄のスタート Embed からタイマー開始
 - フェーズ切替時の通知音 (work_end / break_end / final_start)
 - 最終休憩残り 10 秒で終了予告音 (countdown_warning)
-- 終了時の終了演出 (finish.mp3 + お疲れさま投稿 + 4 秒余韻 + VC 全員強制退出 + bot 退出 + 新スタート Embed → idle)
+- 終了時の終了演出 (finish.mp3 + お疲れさま投稿 + 3 秒余韻 + VC 全員強制退出 + bot 退出 + 新スタート Embed → idle)
 - VC 自動入退室 (人間ゼロ 1 分で退出。タイマー実行中なら終了演出を発動)
 - ロール単位のコマンド実行制限 + `/pomo admin-role` で許可ロールを追加管理
 - VC テキスト欄に bot 自身の Embed は常に 1 つだけ保つ (新規投稿時に古い Embed を自動掃除)
