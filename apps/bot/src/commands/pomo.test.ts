@@ -4,7 +4,7 @@ import type { Logger } from 'pino';
 import type { BotConfig } from '@co-working-call/shared';
 import type { VoiceSession } from '../voice/session-registry.js';
 import { PermissionFlagsBits } from 'discord.js';
-import { handleAdminRole, handlePomoStop, pomoCommand } from './pomo.js';
+import { handleAdminRole, handlePomoInit, handlePomoStop, pomoCommand } from './pomo.js';
 
 vi.mock('../config/index.js', () => ({ loadConfig: vi.fn(), saveConfig: vi.fn() }));
 import { loadConfig, saveConfig } from '../config/index.js';
@@ -194,5 +194,107 @@ describe('handleAdminRole', () => {
       'cfg.json',
       expect.objectContaining({ adminRoleNames: [] }),
     );
+  });
+});
+
+describe('handlePomoInit: Start Embed を EmbedManager に取り込む (設定モーダル再投稿の前提)', () => {
+  beforeEach(() => {
+    vi.mocked(loadConfig).mockResolvedValue({ status: 'ok', config: { ...CONFIG } });
+    vi.mocked(saveConfig).mockResolvedValue(undefined);
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('channel.send で投稿した Start Embed の id を session.embedManager.adoptStartEmbed に渡す', async () => {
+    // handlePomoInit は permissionsFor / channel.send / channel.messages.fetch などを
+    // 直接触るため、それらを満たす最小モック VoiceChannel を構築する。
+    const send = vi.fn(() => Promise.resolve({ id: 'start-embed-msg-id' }));
+    const channelMessages = {
+      fetch: vi.fn(() =>
+        // purgeOwnEmbeds が読む形: filter().values()
+        Promise.resolve({ filter: () => ({ values: () => [].values() }) }),
+      ),
+    };
+    const fakeMe = { id: 'bot-1' };
+    const channel = {
+      id: 'vc-1',
+      type: ChannelType.GuildVoice,
+      send,
+      messages: channelMessages,
+      permissionsFor: vi.fn(() => ({
+        has: () => true,
+        missing: () => [],
+      })),
+      client: { user: { id: 'bot-1' } },
+    };
+
+    const memberFetch = vi.fn(() =>
+      Promise.resolve({ roles: { cache: [{ name: 'pomo-admin' }] } }),
+    );
+    const deferReply = vi.fn(() => Promise.resolve());
+    const editReply = vi.fn(() => Promise.resolve());
+    const interaction = {
+      user: { id: 'user-1' },
+      guildId: 'guild-1',
+      guild: { id: 'guild-1', members: { fetch: memberFetch, me: fakeMe } },
+      channel,
+      options: { getSubcommand: () => 'init', getSubcommandGroup: () => null },
+      deferred: false,
+      replied: false,
+      deferReply,
+      editReply,
+      client: { user: { id: 'bot-1' } },
+    } as unknown as ChatInputCommandInteraction;
+
+    const adoptStartEmbed = vi.fn();
+    const ensureConnected = vi.fn(() => Promise.resolve(true));
+    const session = {
+      config: CONFIG,
+      embedManager: { adoptStartEmbed },
+      voiceManager: { ensureConnected, connected: false },
+    } as unknown as VoiceSession;
+
+    await handlePomoInit(interaction, session, 'cfg.json', logger);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(adoptStartEmbed).toHaveBeenCalledWith('start-embed-msg-id');
+    // 後続処理 (VC 接続) も通常通り実行される。
+    expect(ensureConnected).toHaveBeenCalledTimes(1);
+  });
+
+  it('session 未注入 (READY 前) でも channel.send 自体は完遂し adoptStartEmbed は呼ばれない', async () => {
+    const send = vi.fn(() => Promise.resolve({ id: 'start-embed-msg-id' }));
+    const channel = {
+      id: 'vc-1',
+      type: ChannelType.GuildVoice,
+      send,
+      messages: {
+        fetch: vi.fn(() => Promise.resolve({ filter: () => ({ values: () => [].values() }) })),
+      },
+      permissionsFor: vi.fn(() => ({ has: () => true, missing: () => [] })),
+      client: { user: { id: 'bot-1' } },
+    };
+    const memberFetch = vi.fn(() =>
+      Promise.resolve({ roles: { cache: [{ name: 'pomo-admin' }] } }),
+    );
+    const interaction = {
+      user: { id: 'user-1' },
+      guildId: 'guild-1',
+      guild: { id: 'guild-1', members: { fetch: memberFetch, me: { id: 'bot-1' } } },
+      channel,
+      options: { getSubcommand: () => 'init', getSubcommandGroup: () => null },
+      deferred: false,
+      replied: false,
+      deferReply: vi.fn(() => Promise.resolve()),
+      editReply: vi.fn(() => Promise.resolve()),
+      client: { user: { id: 'bot-1' } },
+    } as unknown as ChatInputCommandInteraction;
+
+    // session=undefined でも throw せず完了する (adoptStartEmbed は呼ばれない)。
+    await expect(
+      handlePomoInit(interaction, undefined, 'cfg.json', logger),
+    ).resolves.toBeUndefined();
+    expect(send).toHaveBeenCalledTimes(1);
   });
 });
