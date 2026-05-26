@@ -394,7 +394,7 @@ describe('EmbedManager 終了演出フロー (US-19)', () => {
     vi.useRealTimers();
   });
 
-  it('ended 突入で playFinish→Embed削除→お疲れさま投稿→余韻→kick→disconnect→新スタートEmbed の順で実行', async () => {
+  it('ended 突入で playFinish→Embed削除→お疲れさま投稿→余韻→kick→disconnect→お疲れさま削除→新スタートEmbed の順で実行', async () => {
     const { channel, post, del, calls } = fakeChannel();
     const sound = fakeSound();
     const ending = fakeEndingActions();
@@ -422,7 +422,7 @@ describe('EmbedManager 終了演出フロー (US-19)', () => {
 
     // finish 音は 1 回鳴る。
     expect(sound.playFinish).toHaveBeenCalledTimes(1);
-    // タイマー Embed が削除される。
+    // タイマー Embed (m1) が削除される。
     expect(del).toHaveBeenCalledWith(timerEmbedId);
     // お疲れさま投稿が post される (SuppressNotifications なし = flags 未指定)。
     const farewellCall = post.mock.calls.find((c) => c[0].content === 'お疲れさまでした 👋');
@@ -432,11 +432,47 @@ describe('EmbedManager 終了演出フロー (US-19)', () => {
     // VC 全員強制退出 → bot 退出の順。
     expect(ending.kickAllHumans).toHaveBeenCalledTimes(1);
     expect(ending.disconnectBot).toHaveBeenCalledTimes(1);
+    // お疲れさま投稿 (m2) が新スタート Embed 投稿前に削除される。
+    // fakeChannel は post ごとに m1, m2... を返す: timerEmbed=m1, farewell=m2, new start=m3。
+    expect(del.mock.calls.map((c) => c[0])).toContain('m2');
     // 新スタート Embed が投稿され、idle に戻る。
     expect(m.startEmbedId).not.toBeNull();
-    // 呼び出し順序: post(farewell) は ended 中の post 列の前半、最後の post は新スタート Embed。
+    // 呼び出し順序: ended 中の post 列は farewell + 新スタート Embed の最低 2 回。
     const postIndices = calls.map((c, i) => (c === 'post' ? i : -1)).filter((i) => i >= 0);
     expect(postIndices.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('お疲れさま投稿の削除に失敗しても新スタート Embed は投稿される (best-effort)', async () => {
+    const { channel, del } = fakeChannel();
+    // 2 番目のメッセージ (お疲れさま投稿 = m2) の削除だけ失敗させる。
+    del.mockImplementation((id: string) => {
+      if (id === 'm2') {
+        return Promise.reject(new Error('farewell delete failed'));
+      }
+      return Promise.resolve();
+    });
+    const sound = fakeSound();
+    const ending = fakeEndingActions();
+    const timer = new FakeTimer();
+    const m = new EmbedManager({
+      channel,
+      timer,
+      config,
+      logger,
+      soundNotifier: sound.notifier,
+      endingActions: ending.actions,
+      endingDelay: () => Promise.resolve(),
+    });
+    timer.emit('phaseChange', makeSnapshot('work'));
+    await vi.advanceTimersByTimeAsync(0);
+
+    timer.emit('ended', makeSnapshot('ended'));
+    await vi.advanceTimersByTimeAsync(0);
+
+    // 削除は試行された (失敗しても呼び出し自体は記録される)。
+    expect(del.mock.calls.map((c) => c[0])).toContain('m2');
+    // 削除失敗でも新スタート Embed は投稿されている。
+    expect(m.startEmbedId).not.toBeNull();
   });
 
   it('isEnding ガード: 二重 ended でも終了演出は 1 回のみ走る', async () => {
