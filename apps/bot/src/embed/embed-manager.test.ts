@@ -27,6 +27,7 @@ type Ev = 'phaseChange' | 'countdown' | 'ended';
 
 class FakeTimer implements TimerLike {
   snapshot: TimerSnapshot = makeSnapshot('idle');
+  resetCallCount = 0;
   #listeners = new Map<Ev, ((s: TimerSnapshot) => void)[]>();
 
   getSnapshot(): TimerSnapshot {
@@ -45,6 +46,11 @@ class FakeTimer implements TimerLike {
     for (const l of this.#listeners.get(event) ?? []) {
       l(s);
     }
+  }
+
+  reset(): void {
+    this.resetCallCount += 1;
+    this.snapshot = makeSnapshot('idle');
   }
 }
 
@@ -435,6 +441,9 @@ describe('EmbedManager 終了演出フロー (US-19)', () => {
     // お疲れさま投稿 (m2) が新スタート Embed 投稿前に削除される。
     // fakeChannel は post ごとに m1, m2... を返す: timerEmbed=m1, farewell=m2, new start=m3。
     expect(del.mock.calls.map((c) => c[0])).toContain('m2');
+    // タイマーが reset され、次の ▶開始で getSnapshot().phase==='idle' になる。
+    expect(timer.resetCallCount).toBe(1);
+    expect(timer.getSnapshot().phase).toBe('idle');
     // 新スタート Embed が投稿され、idle に戻る。
     expect(m.startEmbedId).not.toBeNull();
     // 呼び出し順序: ended 中の post 列は farewell + 新スタート Embed の最低 2 回。
