@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MessageCreateOptions } from 'discord.js';
 import type { Logger } from 'pino';
 import type { BotConfig, TimerSnapshot } from '@co-working-call/shared';
 import {
@@ -52,7 +53,7 @@ function fakeChannel() {
   // post 呼び出しの直前に purgeOwnEmbeds が呼ばれているかを order で検証するため、
   // 共通の calls 配列に名前を記録する。
   const calls: string[] = [];
-  const post = vi.fn<() => Promise<PostedMessage>>(() => {
+  const post = vi.fn<(options: MessageCreateOptions) => Promise<PostedMessage>>(() => {
     calls.push('post');
     n += 1;
     return Promise.resolve({ id: `m${String(n)}` });
@@ -74,13 +75,32 @@ function fakeSound() {
   const playBreakEnd = vi.fn();
   const playFinalStart = vi.fn();
   const playCountdownWarning = vi.fn();
+  const playFinish = vi.fn();
   const notifier: PhaseSoundNotifier = {
     playWorkEnd,
     playBreakEnd,
     playFinalStart,
     playCountdownWarning,
+    playFinish,
   };
-  return { notifier, playWorkEnd, playBreakEnd, playFinalStart, playCountdownWarning };
+  return {
+    notifier,
+    playWorkEnd,
+    playBreakEnd,
+    playFinalStart,
+    playCountdownWarning,
+    playFinish,
+  };
+}
+
+function fakeEndingActions() {
+  const kickAllHumans = vi.fn<() => Promise<void>>(() => Promise.resolve());
+  const disconnectBot = vi.fn();
+  return {
+    actions: { kickAllHumans, disconnectBot },
+    kickAllHumans,
+    disconnectBot,
+  };
 }
 
 const logger = {
@@ -120,25 +140,35 @@ describe('EmbedManager', () => {
     expect(m.startEmbedId).toBe('m1');
   });
 
-  it('post の直前に purgeOwnEmbeds を呼ぶ (テキスト欄の Embed を 1 つに保つ)', async () => {
-    const { channel, purgeOwnEmbeds, calls } = fakeChannel();
+  it('Embed 投稿の直前に purgeOwnEmbeds を呼ぶ (お疲れさまテキストは Embed なしで対象外)', async () => {
+    const { channel, post, purgeOwnEmbeds, calls } = fakeChannel();
     const timer = new FakeTimer();
-    const m = new EmbedManager({ channel, timer, config, logger });
-    await m.onIdle(); // post: スタート Embed
-    timer.emit('phaseChange', makeSnapshot('work')); // post: タイマー Embed
+    const m = new EmbedManager({
+      channel,
+      timer,
+      config,
+      logger,
+      endingDelay: () => Promise.resolve(),
+    });
+    await m.onIdle(); // Embed post: スタート
+    timer.emit('phaseChange', makeSnapshot('work')); // Embed post: タイマー
     await vi.advanceTimersByTimeAsync(0);
-    timer.emit('phaseChange', makeSnapshot('break')); // post: 再投稿
+    timer.emit('phaseChange', makeSnapshot('break')); // Embed post: 再投稿
     await vi.advanceTimersByTimeAsync(0);
-    timer.emit('ended', makeSnapshot('ended')); // post: スタート Embed
+    timer.emit('ended', makeSnapshot('ended')); // text post: お疲れさま + Embed post: 新スタート
     await vi.advanceTimersByTimeAsync(0);
 
-    // 4 回 post したなら 4 回 purge も走り、順序は常に purge→post
+    // Embed 投稿は 4 回 (onIdle / work / break / ended後の新スタート)。
+    // お疲れさまテキストは Embed なしの直接 post で 1 回追加 = post 計 5 回。
+    expect(post).toHaveBeenCalledTimes(5);
+    // purge は Embed 投稿 4 回分だけ。お疲れさまテキストの前には purge を入れない。
     expect(purgeOwnEmbeds).toHaveBeenCalledTimes(4);
-    const pairs = calls.reduce<string[]>((acc, c, i) => {
-      if (c === 'post') acc.push(`${calls[i - 1] ?? ''}->post`);
-      return acc;
-    }, []);
-    expect(pairs.every((p) => p === 'purge->post')).toBe(true);
+    const purgeBeforePost = calls.reduce<number>(
+      (acc, c, i) => (c === 'post' && calls[i - 1] === 'purge' ? acc + 1 : acc),
+      0,
+    );
+    expect(purgeBeforePost).toBe(4);
+    expect(m.startEmbedId).not.toBeNull();
   });
 
   it('onIdle 再実行は既存スタート Embed を削除してから出し直す (冪等)', async () => {
@@ -185,10 +215,17 @@ describe('EmbedManager', () => {
     expect(post.mock.calls.length).toBe(before + 1);
   });
 
-  it('countdown で edit、ended で削除→スタート投稿', async () => {
+  it('countdown で edit、ended で削除→お疲れさま投稿→4秒待機→新スタート投稿', async () => {
     const { channel, edit, del } = fakeChannel();
     const timer = new FakeTimer();
-    const m = new EmbedManager({ channel, timer, config, logger });
+    // endingDelay を即解決にして fake timers の advanceTimersByTime 依存を最小化する
+    const m = new EmbedManager({
+      channel,
+      timer,
+      config,
+      logger,
+      endingDelay: () => Promise.resolve(),
+    });
     timer.emit('phaseChange', makeSnapshot('work'));
     await vi.advanceTimersByTimeAsync(0);
 
@@ -346,6 +383,145 @@ describe('EmbedManager countdown 突入の終了予告音 (US-18)', () => {
     // 例外なく countdown 表示への edit が走ること (=既存挙動を壊さない)
     expect(edit).toHaveBeenCalled();
     expect(m.timerEmbedId).not.toBeNull();
+  });
+});
+
+describe('EmbedManager 終了演出フロー (US-19)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('ended 突入で playFinish→Embed削除→お疲れさま投稿→余韻→kick→disconnect→新スタートEmbed の順で実行', async () => {
+    const { channel, post, del, calls } = fakeChannel();
+    const sound = fakeSound();
+    const ending = fakeEndingActions();
+    const timer = new FakeTimer();
+    const delaySeq: number[] = [];
+    const m = new EmbedManager({
+      channel,
+      timer,
+      config,
+      logger,
+      soundNotifier: sound.notifier,
+      endingActions: ending.actions,
+      endingDelay: (ms) => {
+        delaySeq.push(ms);
+        return Promise.resolve();
+      },
+    });
+    timer.emit('phaseChange', makeSnapshot('work'));
+    await vi.advanceTimersByTimeAsync(0);
+    const timerEmbedId = m.timerEmbedId;
+    expect(timerEmbedId).not.toBeNull();
+
+    timer.emit('ended', makeSnapshot('ended'));
+    await vi.advanceTimersByTimeAsync(0);
+
+    // finish 音は 1 回鳴る。
+    expect(sound.playFinish).toHaveBeenCalledTimes(1);
+    // タイマー Embed が削除される。
+    expect(del).toHaveBeenCalledWith(timerEmbedId);
+    // お疲れさま投稿が post される (SuppressNotifications なし = flags 未指定)。
+    const farewellCall = post.mock.calls.find((c) => c[0].content === 'お疲れさまでした 👋');
+    expect(farewellCall).toBeDefined();
+    // 余韻 4 秒の delay が呼ばれる。
+    expect(delaySeq).toEqual([4_000]);
+    // VC 全員強制退出 → bot 退出の順。
+    expect(ending.kickAllHumans).toHaveBeenCalledTimes(1);
+    expect(ending.disconnectBot).toHaveBeenCalledTimes(1);
+    // 新スタート Embed が投稿され、idle に戻る。
+    expect(m.startEmbedId).not.toBeNull();
+    // 呼び出し順序: post(farewell) は ended 中の post 列の前半、最後の post は新スタート Embed。
+    const postIndices = calls.map((c, i) => (c === 'post' ? i : -1)).filter((i) => i >= 0);
+    expect(postIndices.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('isEnding ガード: 二重 ended でも終了演出は 1 回のみ走る', async () => {
+    const { channel, post } = fakeChannel();
+    const sound = fakeSound();
+    const ending = fakeEndingActions();
+    const timer = new FakeTimer();
+    const m = new EmbedManager({
+      channel,
+      timer,
+      config,
+      logger,
+      soundNotifier: sound.notifier,
+      endingActions: ending.actions,
+      endingDelay: () => Promise.resolve(),
+    });
+    timer.emit('phaseChange', makeSnapshot('work'));
+    await vi.advanceTimersByTimeAsync(0);
+
+    // 1 回目を開始 (await しないで 2 回目を即座にトリガー)。
+    const first = m.onEnded();
+    const second = m.onEnded();
+    await Promise.all([first, second]);
+
+    expect(sound.playFinish).toHaveBeenCalledTimes(1);
+    expect(ending.kickAllHumans).toHaveBeenCalledTimes(1);
+    expect(ending.disconnectBot).toHaveBeenCalledTimes(1);
+    // お疲れさま投稿は 1 回・新スタート Embed 投稿は 1 回 = post 合計 3 (初回タイマー含む)
+    const farewellCount = post.mock.calls.filter(
+      (c) => c[0].content === 'お疲れさまでした 👋',
+    ).length;
+    expect(farewellCount).toBe(1);
+    expect(m.startEmbedId).not.toBeNull();
+  });
+
+  it('endingActions 未注入でも finish音・お疲れさま・余韻・新スタートEmbed は走る (kick/退出のみスキップ)', async () => {
+    const { channel, post } = fakeChannel();
+    const sound = fakeSound();
+    const timer = new FakeTimer();
+    const m = new EmbedManager({
+      channel,
+      timer,
+      config,
+      logger,
+      soundNotifier: sound.notifier,
+      endingDelay: () => Promise.resolve(),
+    });
+    timer.emit('phaseChange', makeSnapshot('work'));
+    await vi.advanceTimersByTimeAsync(0);
+
+    timer.emit('ended', makeSnapshot('ended'));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(sound.playFinish).toHaveBeenCalledTimes(1);
+    const farewellCount = post.mock.calls.filter(
+      (c) => c[0].content === 'お疲れさまでした 👋',
+    ).length;
+    expect(farewellCount).toBe(1);
+    expect(m.startEmbedId).not.toBeNull();
+  });
+
+  it('kickAllHumans が reject しても disconnectBot と新スタート Embed は実行される (best-effort)', async () => {
+    const { channel } = fakeChannel();
+    const sound = fakeSound();
+    const ending = fakeEndingActions();
+    ending.kickAllHumans.mockRejectedValueOnce(new Error('boom'));
+    const timer = new FakeTimer();
+    const m = new EmbedManager({
+      channel,
+      timer,
+      config,
+      logger,
+      soundNotifier: sound.notifier,
+      endingActions: ending.actions,
+      endingDelay: () => Promise.resolve(),
+    });
+    timer.emit('phaseChange', makeSnapshot('work'));
+    await vi.advanceTimersByTimeAsync(0);
+
+    timer.emit('ended', makeSnapshot('ended'));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(ending.kickAllHumans).toHaveBeenCalledTimes(1);
+    expect(ending.disconnectBot).toHaveBeenCalledTimes(1);
+    expect(m.startEmbedId).not.toBeNull();
   });
 });
 

@@ -25,11 +25,13 @@ describe('playPhaseTransitionSound', () => {
     const playBreakEnd = vi.fn();
     const playFinalStart = vi.fn();
     const playCountdownWarning = vi.fn();
+    const playFinish = vi.fn();
     const notifier: PhaseSoundNotifier = {
       playWorkEnd,
       playBreakEnd,
       playFinalStart,
       playCountdownWarning,
+      playFinish,
     };
 
     playPhaseTransitionSound(notifier, 'workEnd');
