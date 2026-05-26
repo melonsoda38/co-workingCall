@@ -46,8 +46,13 @@
 
 送信時:
 - zodで数値・範囲バリデーション
-- OK → config.json 更新、作業スタート用Embedも更新
-- NG → ユーザーにエラーメッセージで応答
+- OK → config.json 更新 → ephemeral "設定を保存しました ✅" 応答 →
+  作業スタート用 Embed を投稿し直す (旧 Embed を delete → 最新設定で再 post、
+  チャンネル最下部に最新版が出る)
+- スタート用 Embed が存在しない (タイマー稼働中等) 場合は再投稿は no-op
+  (config 自体は保存済み・▶開始時の loadConfig で最新値が反映される)
+- 再投稿の失敗は best-effort: warn ログのみで保存応答は成功扱いのまま
+- NG → ユーザーにエラーメッセージで応答 (config.json は変更されない)
 
 ## Embed投稿時の必須フラグ
 全Embed投稿は MessageFlags.SuppressNotifications を必ず付ける。

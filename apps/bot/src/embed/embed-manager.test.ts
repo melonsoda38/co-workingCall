@@ -561,7 +561,7 @@ describe('EmbedManager 終了演出フロー (US-19)', () => {
   });
 });
 
-describe('EmbedManager.updateStartEmbed (US-12)', () => {
+describe('EmbedManager.repostStartEmbed (設定モーダル結線)', () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -569,25 +569,36 @@ describe('EmbedManager.updateStartEmbed (US-12)', () => {
     vi.useRealTimers();
   });
 
-  it('startEmbed を新 config で edit する', async () => {
-    const { channel, edit } = fakeChannel();
+  it('既存 Start Embed を delete → 最新 config で post し直す', async () => {
+    const { channel, post, del, purgeOwnEmbeds, calls } = fakeChannel();
     const m = new EmbedManager({ channel, timer: new FakeTimer(), config, logger });
-    await m.onIdle(); // startEmbedId = m1
+    await m.onIdle(); // startEmbedId = m1, calls=['purge','post']
+    post.mockClear();
+    del.mockClear();
+    purgeOwnEmbeds.mockClear();
+    calls.length = 0;
 
     const newConfig: BotConfig = {
       ...config,
       default: { ...config.default, workSec: 3000 },
     };
-    await m.updateStartEmbed(newConfig);
+    await m.repostStartEmbed(newConfig);
 
-    expect(edit).toHaveBeenCalled();
-    expect(edit.mock.calls[0]?.[0]).toBe('m1');
+    // 旧 m1 を delete → purge → post の順 (#postFresh 経由)。
+    expect(del).toHaveBeenCalledWith('m1');
+    expect(calls).toEqual(['purge', 'post']);
+    expect(post).toHaveBeenCalledTimes(1);
+    // 新 Embed 投稿の id を新 startEmbedId として保持。
+    expect(m.startEmbedId).not.toBeNull();
+    expect(m.startEmbedId).not.toBe('m1');
   });
 
-  it('startEmbed 未投稿なら edit しない', async () => {
-    const { channel, edit } = fakeChannel();
+  it('Start Embed 未投稿なら config 反映のみで post/delete しない (no-op)', async () => {
+    const { channel, post, del } = fakeChannel();
     const m = new EmbedManager({ channel, timer: new FakeTimer(), config, logger });
-    await m.updateStartEmbed(config);
-    expect(edit).not.toHaveBeenCalled();
+    await m.repostStartEmbed(config);
+    expect(post).not.toHaveBeenCalled();
+    expect(del).not.toHaveBeenCalled();
+    expect(m.startEmbedId).toBeNull();
   });
 });
