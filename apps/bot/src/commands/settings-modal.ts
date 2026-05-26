@@ -49,25 +49,26 @@ export function buildSettingsModal(timer: TimerConfig): ModalBuilder {
     .setCustomId(SETTINGS_MODAL_ID)
     .setTitle('🍅 タイマー設定')
     .addLabelComponents(
+      // 全フィールドの最大は 999 → 入力長 3 桁。
       labelField(WORK_MIN_ID, '作業時間（分）', min(timer.workSec), 3),
       labelField(BREAK_MIN_ID, '休憩時間（分）', min(timer.breakSec), 3),
-      labelField(SETS_ID, 'セット数', String(timer.sets), 2),
+      labelField(SETS_ID, 'セット数', String(timer.sets), 3),
       labelField(FINAL_MIN_ID, '最終休憩（分）', min(timer.finalBreakSec), 3),
     );
 }
 
 const SettingsModalSchema = z.object({
-  workMin: z.coerce.number().int().min(1).max(60),
-  breakMin: z.coerce.number().int().min(1).max(30),
-  sets: z.coerce.number().int().min(1).max(20),
-  finalMin: z.coerce.number().int().min(1).max(30),
+  workMin: z.coerce.number().int().min(1).max(999),
+  breakMin: z.coerce.number().int().min(1).max(999),
+  sets: z.coerce.number().int().min(1).max(999),
+  finalMin: z.coerce.number().int().min(1).max(999),
 });
 
 const FIELD_ERROR: Record<string, string> = {
-  workMin: '作業時間は1〜60分の整数で入力してください',
-  breakMin: '休憩時間は1〜30分の整数で入力してください',
-  sets: 'セット数は1〜20の整数で入力してください',
-  finalMin: '最終休憩は1〜30分の整数で入力してください',
+  workMin: '作業時間は1〜999分の整数で入力してください',
+  breakMin: '休憩時間は1〜999分の整数で入力してください',
+  sets: 'セット数は1〜999の整数で入力してください',
+  finalMin: '最終休憩は1〜999分の整数で入力してください',
 };
 
 /**

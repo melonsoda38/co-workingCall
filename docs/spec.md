@@ -68,10 +68,10 @@ zodスキーマで定義し z.infer で型を導出する。
 
 ### TimerConfig (タイマー1回分の設定)
 ```
-workSec       : number (60〜3600)
-breakSec      : number (60〜1800)
-sets          : number (1〜20)
-finalBreakSec : number (60〜1800)
+workSec       : number (60〜59940)   // 1〜999分
+breakSec      : number (60〜59940)   // 1〜999分
+sets          : number (1〜999)
+finalBreakSec : number (60〜59940)   // 1〜999分
 ```
 
 ### TimerPhase

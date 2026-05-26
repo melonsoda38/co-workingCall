@@ -13,23 +13,27 @@ describe('TimerConfigSchema', () => {
       TimerConfigSchema.safeParse({ workSec: 60, breakSec: 60, sets: 1, finalBreakSec: 60 })
         .success,
     ).toBe(true);
+    // 最大: 999分=59,940秒, sets 999。
     expect(
       TimerConfigSchema.safeParse({
-        workSec: 3600,
-        breakSec: 1800,
-        sets: 20,
-        finalBreakSec: 1800,
+        workSec: 999 * 60,
+        breakSec: 999 * 60,
+        sets: 999,
+        finalBreakSec: 999 * 60,
       }).success,
     ).toBe(true);
   });
 
   it('範囲外を拒否する', () => {
     expect(TimerConfigSchema.safeParse({ ...valid, workSec: 59 }).success).toBe(false);
-    expect(TimerConfigSchema.safeParse({ ...valid, workSec: 3601 }).success).toBe(false);
-    expect(TimerConfigSchema.safeParse({ ...valid, breakSec: 1801 }).success).toBe(false);
+    expect(TimerConfigSchema.safeParse({ ...valid, workSec: 999 * 60 + 1 }).success).toBe(false);
+    expect(TimerConfigSchema.safeParse({ ...valid, breakSec: 999 * 60 + 1 }).success).toBe(false);
     expect(TimerConfigSchema.safeParse({ ...valid, sets: 0 }).success).toBe(false);
-    expect(TimerConfigSchema.safeParse({ ...valid, sets: 21 }).success).toBe(false);
+    expect(TimerConfigSchema.safeParse({ ...valid, sets: 1000 }).success).toBe(false);
     expect(TimerConfigSchema.safeParse({ ...valid, finalBreakSec: 59 }).success).toBe(false);
+    expect(TimerConfigSchema.safeParse({ ...valid, finalBreakSec: 999 * 60 + 1 }).success).toBe(
+      false,
+    );
   });
 
   it('非整数を拒否する', () => {

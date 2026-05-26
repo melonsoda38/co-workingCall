@@ -35,24 +35,25 @@ describe('parseSettingsModalInput', () => {
     expect(
       parseSettingsModalInput({ workMin: '1', breakMin: '1', sets: '1', finalMin: '1' }).ok,
     ).toBe(true);
+    // 最大はすべて 999。
     expect(
-      parseSettingsModalInput({ workMin: '60', breakMin: '30', sets: '20', finalMin: '30' }).ok,
+      parseSettingsModalInput({ workMin: '999', breakMin: '999', sets: '999', finalMin: '999' }).ok,
     ).toBe(true);
   });
 
   it('範囲外はフィールド別エラー文言を返す', () => {
     const r = parseSettingsModalInput({
       workMin: '0',
-      breakMin: '31',
-      sets: '21',
+      breakMin: '1000',
+      sets: '1000',
       finalMin: '0',
     });
     expect(r.ok).toBe(false);
     if (!r.ok) {
-      expect(r.errors).toContain('作業時間は1〜60分の整数で入力してください');
-      expect(r.errors).toContain('休憩時間は1〜30分の整数で入力してください');
-      expect(r.errors).toContain('セット数は1〜20の整数で入力してください');
-      expect(r.errors).toContain('最終休憩は1〜30分の整数で入力してください');
+      expect(r.errors).toContain('作業時間は1〜999分の整数で入力してください');
+      expect(r.errors).toContain('休憩時間は1〜999分の整数で入力してください');
+      expect(r.errors).toContain('セット数は1〜999の整数で入力してください');
+      expect(r.errors).toContain('最終休憩は1〜999分の整数で入力してください');
     }
   });
 
@@ -204,7 +205,7 @@ describe('handleSettingsModalSubmit (Start Embed 投稿し直し結線)', () => 
 
     expect(interaction.reply).toHaveBeenCalledTimes(1);
     const replyCall = interaction.reply.mock.calls[0]?.[0];
-    expect(replyCall?.content).toContain('作業時間は1〜60分の整数で入力してください');
+    expect(replyCall?.content).toContain('作業時間は1〜999分の整数で入力してください');
     expect(repostStartEmbed).not.toHaveBeenCalled();
     // config.json は変更されない。
     const saved = JSON.parse(await readFile(configPath, 'utf-8')) as BotConfig;
