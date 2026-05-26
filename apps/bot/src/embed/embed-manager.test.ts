@@ -73,8 +73,14 @@ function fakeSound() {
   const playWorkEnd = vi.fn();
   const playBreakEnd = vi.fn();
   const playFinalStart = vi.fn();
-  const notifier: PhaseSoundNotifier = { playWorkEnd, playBreakEnd, playFinalStart };
-  return { notifier, playWorkEnd, playBreakEnd, playFinalStart };
+  const playCountdownWarning = vi.fn();
+  const notifier: PhaseSoundNotifier = {
+    playWorkEnd,
+    playBreakEnd,
+    playFinalStart,
+    playCountdownWarning,
+  };
+  return { notifier, playWorkEnd, playBreakEnd, playFinalStart, playCountdownWarning };
 }
 
 const logger = {
@@ -286,6 +292,60 @@ describe('EmbedManager フェーズ切替の通知音 (US-11)', () => {
     const before = edit.mock.calls.length;
     await vi.advanceTimersByTimeAsync(5_000);
     expect(edit.mock.calls.length).toBeGreaterThan(before);
+  });
+});
+
+describe('EmbedManager countdown 突入の終了予告音 (US-18)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('countdown 突入で playCountdownWarning を 1 回呼ぶ', async () => {
+    const { channel } = fakeChannel();
+    const timer = new FakeTimer();
+    const sound = fakeSound();
+    const m = new EmbedManager({ channel, timer, config, logger, soundNotifier: sound.notifier });
+    timer.emit('phaseChange', makeSnapshot('work'));
+    await vi.advanceTimersByTimeAsync(0);
+
+    timer.emit('countdown', makeSnapshot('countdown'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sound.playCountdownWarning).toHaveBeenCalledTimes(1);
+    expect(m.timerEmbedId).not.toBeNull();
+  });
+
+  it('countdown 二重発火でも playCountdownWarning は 1 回のみ (仕様: 1回のみ)', async () => {
+    const { channel } = fakeChannel();
+    const timer = new FakeTimer();
+    const sound = fakeSound();
+    const m = new EmbedManager({ channel, timer, config, logger, soundNotifier: sound.notifier });
+    timer.emit('phaseChange', makeSnapshot('work'));
+    await vi.advanceTimersByTimeAsync(0);
+
+    timer.emit('countdown', makeSnapshot('countdown'));
+    timer.emit('countdown', makeSnapshot('countdown'));
+    timer.emit('countdown', makeSnapshot('countdown'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sound.playCountdownWarning).toHaveBeenCalledTimes(1);
+    // m を経由したものは使わないが、未使用変数警告回避のため参照する
+    expect(m.timerEmbedId).not.toBeNull();
+  });
+
+  it('soundNotifier 未注入なら countdown 突入でも再生呼び出しは起きない (no-op)', async () => {
+    const { channel, edit } = fakeChannel();
+    const timer = new FakeTimer();
+    const m = new EmbedManager({ channel, timer, config, logger });
+    timer.emit('phaseChange', makeSnapshot('work'));
+    await vi.advanceTimersByTimeAsync(0);
+
+    timer.emit('countdown', makeSnapshot('countdown'));
+    await vi.advanceTimersByTimeAsync(0);
+    // 例外なく countdown 表示への edit が走ること (=既存挙動を壊さない)
+    expect(edit).toHaveBeenCalled();
+    expect(m.timerEmbedId).not.toBeNull();
   });
 });
 

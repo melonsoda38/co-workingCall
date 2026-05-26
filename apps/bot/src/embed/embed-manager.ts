@@ -138,9 +138,18 @@ export class EmbedManager {
     }
   }
 
-  /** countdown 突入: 再投稿 OFF・5秒更新停止・countdown 表示に edit。 */
+  /**
+   * countdown 突入: 終了予告音 (US-18) → 再投稿 OFF・5秒更新停止 → countdown 表示に edit。
+   * countdown フェーズは仕様上 1 回のみ突入 (ending-spec §第一段階)。timer 側の
+   * 二重発火に備えて currentPhase ガードで countdown_warning.mp3 の二重再生を防ぐ。
+   */
   async onCountdownEnter(): Promise<void> {
+    if (this.#currentPhase === 'countdown') {
+      // 二重発火: 既に countdown 突入処理を実施済みなので no-op。
+      return;
+    }
     this.#currentPhase = 'countdown';
+    this.#soundNotifier?.playCountdownWarning();
     this.#debouncer.cancel();
     this.#updater?.stop();
     if (this.#timerEmbedId !== null) {
