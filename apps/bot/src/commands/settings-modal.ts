@@ -11,6 +11,7 @@ import type { Logger } from 'pino';
 import { TimerConfigSchema, type BotConfig, type TimerConfig } from '@co-working-call/shared';
 import { z } from 'zod';
 import { loadConfig, saveConfig } from '../config/index.js';
+import { scheduleEphemeralAutoDelete } from './ephemeral.js';
 
 export const SETTINGS_MODAL_ID = 'pomo_settings_modal';
 export const WORK_MIN_ID = 'work_min';
@@ -163,5 +164,8 @@ export async function handleSettingsModalSubmit(
         logger.error({ err: replyErr }, 'エラー応答にも失敗しました');
       }
     }
+  } finally {
+    // 設定モーダル送信の ephemeral 応答を 6 時間後に自動削除する。
+    scheduleEphemeralAutoDelete(interaction, logger);
   }
 }

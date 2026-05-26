@@ -2,6 +2,7 @@ import { ButtonInteraction, MessageFlags } from 'discord.js';
 import type { Logger } from 'pino';
 import { loadConfig } from '../config/index.js';
 import type { VoiceSession } from '../voice/session-registry.js';
+import { scheduleEphemeralAutoDelete } from './ephemeral.js';
 
 /** 実行者が対象 VC にいるかの純判定 (commands-spec: ▶開始の前提条件)。 */
 export function isExecutorInTargetVc(
@@ -23,48 +24,41 @@ export async function handleStartButton(
   configPath: string,
   logger: Logger,
 ): Promise<void> {
+  // 早期 return 系の ephemeral reply 用ヘルパ (各 reply 後の自動削除スケジュール込み)。
+  // 成功パス末尾の deferUpdate は元 Embed の更新用なので scheduleEphemeralAutoDelete は呼ばない
+  // (deleteReply するとボタン押下対象のスタート Embed が消える)。
+  const replyEphemeral = async (content: string): Promise<void> => {
+    await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+    scheduleEphemeralAutoDelete(interaction, logger);
+  };
+
   try {
     if (!session) {
-      await interaction.reply({
-        content: 'セットアップが必要です。/pomo init 実行後に bot を再起動してください',
-        flags: MessageFlags.Ephemeral,
-      });
+      await replyEphemeral('セットアップが必要です。/pomo init 実行後に bot を再起動してください');
       return;
     }
 
     const guild = interaction.guild;
     if (!guild) {
-      await interaction.reply({
-        content: 'サーバー内で実行してください',
-        flags: MessageFlags.Ephemeral,
-      });
+      await replyEphemeral('サーバー内で実行してください');
       return;
     }
 
     const member = await guild.members.fetch(interaction.user.id);
     if (!isExecutorInTargetVc(member.voice.channelId, session.config.voiceChannelId)) {
-      await interaction.reply({
-        content: 'VCに参加してから押してください',
-        flags: MessageFlags.Ephemeral,
-      });
+      await replyEphemeral('VCに参加してから押してください');
       return;
     }
 
     if (session.timer.getSnapshot().phase !== 'idle') {
-      await interaction.reply({
-        content: 'すでにタイマーが動作中です',
-        flags: MessageFlags.Ephemeral,
-      });
+      await replyEphemeral('すでにタイマーが動作中です');
       return;
     }
 
     // bot がまだ VC にいなければ入室する (通常は自動入室済み)。
     const connected = await session.voiceManager.ensureConnected();
     if (!connected) {
-      await interaction.reply({
-        content: 'botがVCに接続できませんでした。少し待って再度お試しください',
-        flags: MessageFlags.Ephemeral,
-      });
+      await replyEphemeral('botがVCに接続できませんでした。少し待って再度お試しください');
       return;
     }
 
@@ -83,10 +77,7 @@ export async function handleStartButton(
     logger.error({ err }, '▶ タイマー開始処理に失敗しました');
     if (!interaction.replied && !interaction.deferred) {
       try {
-        await interaction.reply({
-          content: 'タイマー開始に失敗しました。ログを確認してください',
-          flags: MessageFlags.Ephemeral,
-        });
+        await replyEphemeral('タイマー開始に失敗しました。ログを確認してください');
       } catch (replyErr) {
         logger.error({ err: replyErr }, 'エラー応答にも失敗しました');
       }

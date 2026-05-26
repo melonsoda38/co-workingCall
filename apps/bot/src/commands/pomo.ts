@@ -17,6 +17,7 @@ import {
   isVoiceTextContext,
   missingBotPermissions,
 } from './checks.js';
+import { scheduleEphemeralAutoDelete } from './ephemeral.js';
 
 /** config 未存在時の初期タイマー設定 (commands-spec モーダル placeholder: 50/10/2/15 分)。 */
 const DEFAULT_TIMER: BotConfig['default'] = {
@@ -177,6 +178,9 @@ export async function handlePomoInit(
     } catch (replyErr) {
       logger.error({ err: replyErr }, 'エラー応答にも失敗しました');
     }
+  } finally {
+    // /pomo init の ephemeral 応答を 6 時間後に自動削除する。
+    scheduleEphemeralAutoDelete(interaction, logger);
   }
 }
 
@@ -243,6 +247,9 @@ export async function handlePomoStop(
     } catch (replyErr) {
       logger.error({ err: replyErr }, 'エラー応答にも失敗しました');
     }
+  } finally {
+    // /pomo stop の ephemeral エラー応答を 6 時間後に自動削除 (成功時は deleteReply 済み = no-op)。
+    scheduleEphemeralAutoDelete(interaction, logger);
   }
 }
 
@@ -340,5 +347,8 @@ export async function handleAdminRole(
     } catch (replyErr) {
       logger.error({ err: replyErr }, 'エラー応答にも失敗しました');
     }
+  } finally {
+    // /pomo admin-role の ephemeral 応答を 6 時間後に自動削除する。
+    scheduleEphemeralAutoDelete(interaction, logger);
   }
 }
