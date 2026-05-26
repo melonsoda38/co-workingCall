@@ -122,7 +122,7 @@ describe('VoiceManager', () => {
     expect(connect).toHaveBeenCalledTimes(1);
   });
 
-  it('1+→0 の 1 分後に退出 (idle なら timer.stop しない)', async () => {
+  it('1+→0 の 30 秒後に退出 (idle なら timer.stop しない)', async () => {
     const { vm, connect, destroy, soundPlayer, timer, resetToIdle } = setup({ phase: 'idle' });
     await vm.handleHumanCountChange(1); // 接続
     expect(connect).toHaveBeenCalledTimes(1);
@@ -148,7 +148,7 @@ describe('VoiceManager', () => {
     expect(resetToIdle).toHaveBeenCalledTimes(1);
   });
 
-  it('1 分以内の再入室で退出カウントダウンをキャンセルし接続を維持する', async () => {
+  it('30 秒以内の再入室で退出カウントダウンをキャンセルし接続を維持する', async () => {
     const { vm, connect, destroy, soundPlayer } = setup();
     await vm.handleHumanCountChange(1); // 接続 (init 1回)
     await vm.handleHumanCountChange(0); // CD 開始

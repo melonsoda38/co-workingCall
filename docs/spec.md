@@ -41,7 +41,7 @@ Pi起動 → systemd が bot 起動
   finish.mp3 → Embed削除 → お疲れさま投稿 → 4秒待機
   → VC全員強制退出 → bot即時退出 (CD無し) → スタートEmbed投稿 → idle
    ↓
-[人間ゼロ1分継続] → bot自動退出 (タイマー中なら停止 + 終了処理 → 退出)
+[人間ゼロ30秒継続] → bot自動退出 (タイマー中なら停止 + 終了処理 → 退出)
 ```
 
 **重要**: タイマー終了時に process.exit() しない (Pi稼働中ずっと常駐)
@@ -102,7 +102,7 @@ adminRoleName   : string  // /pomo init 実行権限 (デフォルト 'pomo-admi
 セッション終了時にリセットする項目:
 - タイマー: timer, currentTimerEmbedMessageId, currentStartEmbedMessageId
 - デバウンス: isReposting, debounceTimer, maxWaitTimer, firstTriggerAt
-- VC: voiceConnection, emptyVcTimeoutTimer (1分カウントダウン)
+- VC: voiceConnection, emptyVcTimeoutTimer (30秒カウントダウン)
 - エラー: lastError, errorCount
 
 ## 環境変数 (.env)

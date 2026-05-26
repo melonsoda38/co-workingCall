@@ -197,7 +197,7 @@ export class EmbedManager {
    * finish.mp3 → タイマー Embed 削除 → お疲れさま投稿 → 4秒余韻 →
    * VC 全員強制退出 → bot 退出 → 新スタート Embed 投稿 → idle 復帰。
    *
-   * 二重発火防止 (#isEnding): ended イベント + 空 VC 1 分退出など複数経路から
+   * 二重発火防止 (#isEnding): ended イベント + 空 VC 30 秒退出など複数経路から
    * 同時起動し得るため、最初の 1 回のみ通す。
    * エラー時も必ず #isEnding を解除し、可能なら idle 復帰 (スタート Embed 再投稿) を試みる。
    */
