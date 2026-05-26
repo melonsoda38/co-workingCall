@@ -59,8 +59,12 @@ T+3秒     VC全員強制退出
 6. bot即時退出 (カウントダウン経由しない)
    - voiceConnection.destroy()
    - emptyVcTimeoutTimer をキャンセル
-7. お疲れさま投稿を削除
-   - Embed なしのプレーンテキストなので purgeOwnEmbeds の対象外。明示削除する
+7. お疲れさま投稿 + 歓迎投稿を削除
+   - どちらも Embed なしのプレーンテキストで purgeOwnEmbeds の対象外なので
+     明示削除する
+   - 歓迎投稿 (welcomeMessageId) はタイマー開始時に post された
+     「ご参加ありがとうございます〜」を指す。同タイミングで削除して
+     テキスト欄を整える
    - 削除失敗は best-effort (warn ログのみで継続)
 8. SessionState をリセット (詳細は後述)
 9. 新しい作業スタート用Embedを投稿 (SuppressNotifications)
@@ -168,7 +172,7 @@ ended処理の最後で以下をクリア:
    ├ 3秒待機 (ENDING_DELAY_MS)
    ├ VC全員強制退出
    ├ bot即時退出
-   ├ "お疲れさまでした" 投稿を削除
+   ├ "お疲れさまでした" 投稿 + "ご参加ありがとう" 投稿を削除
    ├ SessionState リセット
    └ 新スタート用Embed投稿
    ↓
