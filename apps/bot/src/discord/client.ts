@@ -11,7 +11,7 @@ import {
   registerCommands,
 } from '../commands/index.js';
 import { loadConfig } from '../config/index.js';
-import { SETTINGS_BUTTON_ID, START_BUTTON_ID } from '../embed/index.js';
+import { SETTINGS_BUTTON_ID, START_BUTTON_ID, shouldHandleHumanMessage } from '../embed/index.js';
 import {
   createVoiceSessionRegistry,
   setupVoiceFeature,
@@ -96,12 +96,28 @@ export async function startBot(token: string, logger: Logger, configPath: string
   });
 
   client.on(Events.MessageCreate, (message) => {
-    if (message.author.bot) {
+    // embed-spec §自動削除&再投稿仕様: 人間メッセージ検知で debouncer をトリガー
+    // (work/break/finalBreak のみ、60秒 debounce / 180秒 maxWait で旧 Embed 削除 → 最下部再投稿)。
+    // フェーズガードと debouncer 制御は EmbedManager.onHumanMessage 内に閉じ込めているため、
+    // ここでは bot 自身の除外 + 対象 VC テキスト欄絞り込みだけ行えばよい。
+    if (!message.guildId) {
       return;
     }
-    // EmbedManager.onHumanMessage への接続は、EmbedManager のライフサイクルが
-    // 確定する後続の全体結線で行う。US-12 時点では検知のみ。
-    logger.debug({ channelId: message.channelId }, '人間メッセージ検知 (messageCreate)');
+    const session = sessions.get(message.guildId);
+    if (!session) {
+      return;
+    }
+    if (
+      !shouldHandleHumanMessage({
+        authorIsBot: message.author.bot,
+        channelId: message.channelId,
+        targetChannelId: session.config.voiceChannelId,
+      })
+    ) {
+      return;
+    }
+    logger.debug({ channelId: message.channelId }, '人間メッセージ検知 → onHumanMessage');
+    session.embedManager.onHumanMessage();
   });
 
   client.on(Events.Error, (err) => {
