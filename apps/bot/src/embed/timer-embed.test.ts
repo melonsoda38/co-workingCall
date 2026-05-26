@@ -8,6 +8,7 @@ const config: BotConfig = {
   guildId: 'g',
   voiceChannelId: 'v',
   adminRoleName: 'pomo-admin',
+  adminRoleNames: [],
 };
 
 const snap = (over: Partial<TimerSnapshot>): TimerSnapshot => ({

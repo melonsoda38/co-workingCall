@@ -5,9 +5,20 @@ export function isVoiceTextContext(channelType: ChannelType | undefined): boolea
   return channelType === ChannelType.GuildVoice;
 }
 
-/** 実行者が adminRoleName ロールを持つか。 */
-export function hasAdminRole(memberRoleNames: readonly string[], adminRoleName: string): boolean {
-  return memberRoleNames.includes(adminRoleName);
+/** config から許可ロール名一覧を作る (基準ロール + 追加ロール、重複除去)。 */
+export function buildAllowedRoleNames(
+  adminRoleName: string,
+  adminRoleNames: readonly string[],
+): string[] {
+  return [...new Set([adminRoleName, ...adminRoleNames])];
+}
+
+/** 実行者が許可ロール一覧のいずれかを持つか。 */
+export function hasAnyAdminRole(
+  memberRoleNames: readonly string[],
+  allowedRoleNames: readonly string[],
+): boolean {
+  return memberRoleNames.some((name) => allowedRoleNames.includes(name));
 }
 
 /** bot に必要な VC 権限 (CLAUDE.me セキュリティ節)。 */

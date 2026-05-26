@@ -1,9 +1,13 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChannelType, type ChatInputCommandInteraction } from 'discord.js';
 import type { Logger } from 'pino';
 import type { BotConfig } from '@co-working-call/shared';
 import type { VoiceSession } from '../voice/session-registry.js';
-import { handlePomoJoin, handlePomoStop } from './pomo.js';
+import { PermissionFlagsBits } from 'discord.js';
+import { handleAdminRole, handlePomoJoin, handlePomoStop, pomoCommand } from './pomo.js';
+
+vi.mock('../config/index.js', () => ({ loadConfig: vi.fn(), saveConfig: vi.fn() }));
+import { loadConfig, saveConfig } from '../config/index.js';
 
 const logger = {
   error: vi.fn(),
@@ -17,27 +21,35 @@ const CONFIG: BotConfig = {
   guildId: 'guild-1',
   voiceChannelId: 'vc-1',
   adminRoleName: 'pomo-admin',
+  adminRoleNames: [],
 };
 
-function makeInteraction(roleNames: string[], channelType: ChannelType = ChannelType.GuildVoice) {
+function makeInteraction(
+  roleNames: string[],
+  channelType: ChannelType = ChannelType.GuildVoice,
+  options?: { subcommand?: string; roleName?: string },
+) {
   const deferReply = vi.fn<() => Promise<void>>(() => Promise.resolve());
   const editReply = vi.fn<() => Promise<void>>(() => Promise.resolve());
   const deleteReply = vi.fn<() => Promise<void>>(() => Promise.resolve());
   const fetch = vi.fn(() =>
     Promise.resolve({ roles: { cache: roleNames.map((name) => ({ name })) } }),
   );
+  const getSubcommand = vi.fn(() => options?.subcommand ?? 'list');
+  const getRole = vi.fn(() => ({ name: options?.roleName ?? 'mod' }));
   const interaction = {
     user: { id: 'user-1' },
     guildId: 'guild-1',
     guild: { id: 'guild-1', members: { fetch } },
     channel: { type: channelType },
+    options: { getSubcommand, getRole },
     deferred: true,
     replied: false,
     deferReply,
     editReply,
     deleteReply,
   } as unknown as ChatInputCommandInteraction;
-  return { interaction, deferReply, editReply, deleteReply, fetch };
+  return { interaction, deferReply, editReply, deleteReply, fetch, getSubcommand, getRole };
 }
 
 function makeSession(opts?: { connected?: boolean; alreadyConnected?: boolean }): {
@@ -59,6 +71,13 @@ function makeSession(opts?: { connected?: boolean; alreadyConnected?: boolean })
   } as unknown as VoiceSession;
   return { session, stop, onIdle, forceDisconnect, ensureConnected };
 }
+
+describe('pomoCommand', () => {
+  it('コマンド一覧の可視性を「サーバー管理」権限保有者に限定している', () => {
+    const json = pomoCommand.toJSON();
+    expect(json.default_member_permissions).toBe(PermissionFlagsBits.ManageGuild.toString());
+  });
+});
 
 describe('handlePomoStop', () => {
   afterEach(() => {
@@ -159,5 +178,79 @@ describe('handlePomoJoin', () => {
     expect(ensureConnected).toHaveBeenCalledTimes(1);
     expect(editReply).toHaveBeenCalledTimes(1);
     expect(deleteReply).not.toHaveBeenCalled();
+  });
+});
+
+describe('handleAdminRole', () => {
+  beforeEach(() => {
+    vi.mocked(loadConfig).mockResolvedValue({ status: 'ok', config: { ...CONFIG } });
+    vi.mocked(saveConfig).mockResolvedValue(undefined);
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('テキストチャンネルなら VC テキスト欄エラーを出し保存しない', async () => {
+    const { interaction, editReply } = makeInteraction(['pomo-admin'], ChannelType.GuildText, {
+      subcommand: 'list',
+    });
+    const { session } = makeSession();
+    await handleAdminRole(interaction, session, 'cfg.json', logger);
+    expect(editReply).toHaveBeenCalledWith(
+      'このコマンドはボイスチャンネル内のテキスト欄で実行してください',
+    );
+    expect(saveConfig).not.toHaveBeenCalled();
+  });
+
+  it('権限が無ければ拒否し保存しない', async () => {
+    const { interaction, editReply } = makeInteraction(['member'], ChannelType.GuildVoice, {
+      subcommand: 'add',
+      roleName: 'mod',
+    });
+    const { session } = makeSession();
+    await handleAdminRole(interaction, session, 'cfg.json', logger);
+    expect(editReply).toHaveBeenCalledTimes(1);
+    expect(saveConfig).not.toHaveBeenCalled();
+  });
+
+  it('list: 現在の許可ロールを表示する', async () => {
+    const { interaction, editReply } = makeInteraction(['pomo-admin'], ChannelType.GuildVoice, {
+      subcommand: 'list',
+    });
+    const { session } = makeSession();
+    await handleAdminRole(interaction, session, 'cfg.json', logger);
+    expect(editReply).toHaveBeenCalledWith(expect.stringContaining('pomo-admin'));
+    expect(saveConfig).not.toHaveBeenCalled();
+  });
+
+  it('add: ロールを追加し保存・セッションへ反映する', async () => {
+    const { interaction } = makeInteraction(['pomo-admin'], ChannelType.GuildVoice, {
+      subcommand: 'add',
+      roleName: 'mod',
+    });
+    const { session } = makeSession();
+    await handleAdminRole(interaction, session, 'cfg.json', logger);
+    expect(saveConfig).toHaveBeenCalledWith(
+      'cfg.json',
+      expect.objectContaining({ adminRoleNames: ['mod'] }),
+    );
+    expect(session.config.adminRoleNames).toEqual(['mod']);
+  });
+
+  it('remove: 登録済みロールを外して保存する', async () => {
+    vi.mocked(loadConfig).mockResolvedValue({
+      status: 'ok',
+      config: { ...CONFIG, adminRoleNames: ['mod'] },
+    });
+    const { interaction } = makeInteraction(['pomo-admin'], ChannelType.GuildVoice, {
+      subcommand: 'remove',
+      roleName: 'mod',
+    });
+    const { session } = makeSession();
+    await handleAdminRole(interaction, session, 'cfg.json', logger);
+    expect(saveConfig).toHaveBeenCalledWith(
+      'cfg.json',
+      expect.objectContaining({ adminRoleNames: [] }),
+    );
   });
 });
