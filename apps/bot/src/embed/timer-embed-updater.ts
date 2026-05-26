@@ -39,15 +39,38 @@ export class TimerEmbedUpdater {
     this.#onError = onError;
   }
 
+  /**
+   * 「次の 5 の倍数秒境界 (残り秒の 1 の位が 0 / 5)」まで setTimeout で待ってから
+   * 初回 update を発火し、以降は setInterval(5_000ms) で厳密に 5 秒ごとに更新する。
+   *
+   * これをやらないと post の API 往復遅延 (数百ms〜2s) がそのまま 5 秒インターバルの
+   * フェイズになり、"59→54→49" のような半端な数字が並ぶ。
+   *
+   * 待ち時間の計算 ((remainingMs - 1) % INTERVAL) + 1 の意図:
+   * - 範囲を 1..INTERVAL に正規化する (0 は不採用)
+   * - remainingMs が境界ちょうど (例 55,000ms) のとき即時 update は冗長なので
+   *   INTERVAL ぶん待たせる (5,000ms 後の "00:50" まで)
+   * - 例: 残り 59,200ms → 4,200ms 待ち → "00:55" 表示
+   * - 例: 残り 55,000ms → 5,000ms 待ち → "00:50" 表示
+   * - 例: 残り    500ms →   500ms 待ち → "00:00" 表示
+   */
   start(): void {
     this.stop();
-    this.#interval = setInterval(() => {
+    const snapshot = this.#source.getSnapshot();
+    const initialDelay = ((snapshot.remainingMs - 1) % TIMER_EMBED_UPDATE_INTERVAL_MS) + 1;
+    this.#interval = setTimeout(() => {
       this.#update();
-    }, TIMER_EMBED_UPDATE_INTERVAL_MS);
+      // 1 回目以降は厳密に 5,000ms 間隔で発火 (境界に揃ったままドリフトしない)。
+      this.#interval = setInterval(() => {
+        this.#update();
+      }, TIMER_EMBED_UPDATE_INTERVAL_MS);
+    }, initialDelay);
   }
 
   stop(): void {
     if (this.#interval !== null) {
+      // Node.js では clearTimeout / clearInterval は同一の Timeout 型を受け取れるため、
+      // setTimeout 状態 (初回境界待ち) / setInterval 状態 (定常) どちらも clearInterval で消せる。
       clearInterval(this.#interval);
       this.#interval = null;
     }
