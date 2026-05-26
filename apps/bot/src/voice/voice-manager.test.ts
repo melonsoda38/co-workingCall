@@ -5,6 +5,7 @@ import {
   VoiceManager,
   classifyHumanCountTransition,
   isTargetVcEvent,
+  isTimerRunning,
   type VoiceConnectionHandle,
 } from './voice-manager.js';
 
@@ -19,7 +20,14 @@ function snapshot(phase: TimerSnapshot['phase']): TimerSnapshot {
   return { phase, remainingMs: 0, currentSet: 0, totalSets: 0, startedAt: null };
 }
 
-function setup(opts?: { connectNull?: boolean; phase?: TimerSnapshot['phase'] }) {
+function setup(opts?: {
+  connectNull?: boolean;
+  phase?: TimerSnapshot['phase'];
+  /** US-20: 終了演出フローを注入するかどうか。 */
+  withTriggerEndingFlow?: boolean;
+  /** triggerEndingFlow が reject するか (best-effort 検証用)。 */
+  triggerEndingFlowRejects?: boolean;
+}) {
   const destroy = vi.fn();
   const subscribe = vi.fn();
   const connection: VoiceConnectionHandle = { subscribe, destroy };
@@ -29,14 +37,18 @@ function setup(opts?: { connectNull?: boolean; phase?: TimerSnapshot['phase'] })
   const soundPlayer = { init: vi.fn(), stop: vi.fn() };
   const timer = { getSnapshot: vi.fn(() => snapshot(opts?.phase ?? 'idle')), stop: vi.fn() };
   const resetToIdle = vi.fn<() => Promise<void>>(() => Promise.resolve());
+  const triggerEndingFlow = vi.fn<() => Promise<void>>(() =>
+    opts?.triggerEndingFlowRejects ? Promise.reject(new Error('ending failed')) : Promise.resolve(),
+  );
   const vm = new VoiceManager({
     logger,
     soundPlayer,
     timer,
     connect,
     resetToIdle,
+    triggerEndingFlow: opts?.withTriggerEndingFlow ? triggerEndingFlow : undefined,
   });
-  return { vm, connect, connection, destroy, soundPlayer, timer, resetToIdle };
+  return { vm, connect, connection, destroy, soundPlayer, timer, resetToIdle, triggerEndingFlow };
 }
 
 describe('classifyHumanCountTransition', () => {
@@ -63,6 +75,17 @@ describe('isTargetVcEvent', () => {
     expect(isTargetVcEvent({ oldChannelId: null, newChannelId: null, targetVcId: 'vc' })).toBe(
       false,
     );
+  });
+});
+
+describe('isTimerRunning', () => {
+  it('work/break/finalBreak/countdown は実行中、idle/ended は非実行', () => {
+    expect(isTimerRunning('work')).toBe(true);
+    expect(isTimerRunning('break')).toBe(true);
+    expect(isTimerRunning('finalBreak')).toBe(true);
+    expect(isTimerRunning('countdown')).toBe(true);
+    expect(isTimerRunning('idle')).toBe(false);
+    expect(isTimerRunning('ended')).toBe(false);
   });
 });
 
@@ -115,7 +138,7 @@ describe('VoiceManager', () => {
     expect(vm.connected).toBe(false);
   });
 
-  it('退出時タイマー実行中なら timer.stop して暗定復帰する', async () => {
+  it('退出時タイマー実行中で triggerEndingFlow 未注入なら暗定復帰 (timer.stop + disconnect + resetToIdle)', async () => {
     const { vm, timer, destroy, resetToIdle } = setup({ phase: 'work' });
     await vm.handleHumanCountChange(1);
     await vm.handleHumanCountChange(0);
@@ -136,6 +159,52 @@ describe('VoiceManager', () => {
     expect(connect).toHaveBeenCalledTimes(1); // 再接続しない
     expect(soundPlayer.init).toHaveBeenCalledTimes(1); // init も1回のまま
     expect(vm.connected).toBe(true);
+  });
+
+  it('US-20: タイマー実行中 + triggerEndingFlow 注入時は終了演出フローを発動し、暗定復帰経路は使わない', async () => {
+    const { vm, timer, destroy, resetToIdle, triggerEndingFlow } = setup({
+      phase: 'work',
+      withTriggerEndingFlow: true,
+    });
+    await vm.handleHumanCountChange(1);
+    await vm.handleHumanCountChange(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(triggerEndingFlow).toHaveBeenCalledTimes(1);
+    // timer.stop / destroy / resetToIdle は triggerEndingFlow 内部 (本番は EmbedManager.onEnded
+    // 経由) で行われる想定。VoiceManager 自身では発動しない。
+    expect(timer.stop).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
+    expect(resetToIdle).not.toHaveBeenCalled();
+  });
+
+  it('US-20: idle 中は triggerEndingFlow を呼ばず暗定復帰のまま (タイマー停止も不要)', async () => {
+    const { vm, timer, destroy, resetToIdle, triggerEndingFlow } = setup({
+      phase: 'idle',
+      withTriggerEndingFlow: true,
+    });
+    await vm.handleHumanCountChange(1);
+    await vm.handleHumanCountChange(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(triggerEndingFlow).not.toHaveBeenCalled();
+    expect(timer.stop).not.toHaveBeenCalled();
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(resetToIdle).toHaveBeenCalledTimes(1);
+  });
+
+  it('US-20: triggerEndingFlow が reject しても例外を伝播させない (best-effort)', async () => {
+    const { vm, triggerEndingFlow } = setup({
+      phase: 'work',
+      withTriggerEndingFlow: true,
+      triggerEndingFlowRejects: true,
+    });
+    await vm.handleHumanCountChange(1);
+    await vm.handleHumanCountChange(0);
+    // 例外が伝播するなら ここで unhandled rejection でテストが落ちる。
+    // 到達すれば伝播していない＝best-effort で握りつぶされている。
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(triggerEndingFlow).toHaveBeenCalledTimes(1);
   });
 
   it('forceDisconnect は即時退出しカウントダウンを止める', async () => {
