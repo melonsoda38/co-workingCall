@@ -266,12 +266,23 @@ export class EmbedManager {
     }
   }
 
-  /** 設定変更時にスタート用 Embed の内容を更新する (US-12)。 */
-  async updateStartEmbed(config: BotConfig): Promise<void> {
+  /**
+   * 設定モーダル保存後に Start Embed を最新 config で投稿し直す (US-12 結線)。
+   * 既存 Start Embed があれば削除してから #postFresh (purge → post) で再投稿し、
+   * 「変更を保存しました」ephemeral の直後にチャンネル最下部へ最新版 Embed を露出させる。
+   *
+   * Start Embed が存在しない (タイマー稼働中で削除済み・初期化未済) 場合は config 反映
+   * のみで no-op。次回 idle 復帰時 (onIdle / 終了演出末尾) に最新 config で投稿される。
+   * 終了演出進行中 (#isEnding) も冪等のため再投稿は行わない (終了演出末尾で投稿される)。
+   */
+  async repostStartEmbed(config: BotConfig): Promise<void> {
     this.#config = config;
-    if (this.#startEmbedId !== null) {
-      await this.#channel.edit(this.#startEmbedId, buildStartEmbedMessage(this.#config));
+    if (this.#startEmbedId === null || this.#isEnding) {
+      return;
     }
+    await this.#deleteStartEmbed();
+    const posted = await this.#postFresh(buildStartEmbedMessage(this.#config));
+    this.#startEmbedId = posted.id;
   }
 
   /**

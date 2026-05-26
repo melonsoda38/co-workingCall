@@ -11,6 +11,7 @@ import type { Logger } from 'pino';
 import { TimerConfigSchema, type BotConfig, type TimerConfig } from '@co-working-call/shared';
 import { z } from 'zod';
 import { loadConfig, saveConfig } from '../config/index.js';
+import type { VoiceSession } from '../voice/session-registry.js';
 import { scheduleEphemeralAutoDelete } from './ephemeral.js';
 
 export const SETTINGS_MODAL_ID = 'pomo_settings_modal';
@@ -113,9 +114,17 @@ export async function handleSettingsButton(
   }
 }
 
-/** モーダル送信 (pomo_settings_modal): 検証 → config 更新 → ephemeral 応答。 */
+/**
+ * モーダル送信 (pomo_settings_modal): 検証 → config 更新 → ephemeral 応答 →
+ * Start Embed 投稿し直し (最新 config で表示)。
+ * session 未注入 (READY 前 / config 未確定) なら Embed 投稿し直しはスキップ
+ * (config 保存は完了しているので、再起動 or 次回 /pomo init で反映される)。
+ * Embed 再投稿の失敗は best-effort: warn ログのみで例外を握りつぶす
+ * (config 保存自体はユーザーに成功通知済みのため、ここで失敗扱いに格上げしない)。
+ */
 export async function handleSettingsModalSubmit(
   interaction: ModalSubmitInteraction,
+  session: VoiceSession | undefined,
   configPath: string,
   logger: Logger,
 ): Promise<void> {
@@ -150,8 +159,20 @@ export async function handleSettingsModalSubmit(
       flags: MessageFlags.Ephemeral,
     });
     logger.info({ default: updated.default }, '設定モーダルで config を更新しました');
-    // スタート用 Embed の内容更新は EmbedManager.updateStartEmbed で行うが、
-    // EmbedManager 実インスタンスの結線は後続 US (全体結線) のため US-12 では未接続。
+
+    // 最新 config で Start Embed を投稿し直す (ephemeral 応答後に実行し、
+    // チャンネル最下部に最新版 Embed を露出させる)。
+    // session 不在 (READY 前) or 失敗時は warn のみ・ユーザー応答は成功扱いのまま。
+    if (session) {
+      try {
+        await session.embedManager.repostStartEmbed(updated);
+      } catch (repostErr) {
+        logger.warn(
+          { err: repostErr },
+          'Start Embed の投稿し直しに失敗 (best-effort、config 保存は完了)',
+        );
+      }
+    }
   } catch (err) {
     logger.error({ err }, '設定モーダル処理に失敗しました');
     if (!interaction.replied) {
@@ -165,7 +186,7 @@ export async function handleSettingsModalSubmit(
       }
     }
   } finally {
-    // 設定モーダル送信の ephemeral 応答を 6 時間後に自動削除する。
+    // 設定モーダル送信の ephemeral 応答を 14 分後に自動削除する。
     scheduleEphemeralAutoDelete(interaction, logger);
   }
 }

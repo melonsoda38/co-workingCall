@@ -190,11 +190,14 @@
   default.workSec, default.breakSec, default.sets,
   default.finalBreakSec を更新
 
-[スタート用Embed更新]
-  現在のスタート用Embedに新設定を反映 (内容のみedit)
-
 [完了応答]
   ephemeral "設定を保存しました ✅"
+
+[スタート用Embed投稿し直し]
+  既存スタート用Embedを delete → 最新設定で再 post
+  (チャンネル最下部に最新版が来る / Embedは常に1つの原則は維持)
+  スタート用Embedが無い (タイマー稼働中等) 場合は no-op
+  失敗は best-effort: warn ログのみ・ユーザー応答は成功扱いのまま
 ```
 
 ### エラーメッセージ
