@@ -219,6 +219,39 @@ describe('VoiceManager', () => {
     expect(destroy).toHaveBeenCalledTimes(1); // CD は発火しない
   });
 
+  it('US-21: #onLeave で退出カウントダウン開始の info ログを出す', async () => {
+    const { vm } = setup();
+    await vm.handleHumanCountChange(1);
+    const infoMock = logger.info as unknown as ReturnType<typeof vi.fn>;
+    infoMock.mockClear();
+    await vm.handleHumanCountChange(0);
+    // pino API は (obj, msg) と (msg) の両形があり、メッセージ本体は最後の文字列引数。
+    // 全 call の文字列引数を走査し、目的のメッセージが含まれる呼び出しがあるか確認する。
+    const found = infoMock.mock.calls.some((call) =>
+      (call as unknown[]).some(
+        (arg) => typeof arg === 'string' && arg.includes('退出カウントダウンを開始'),
+      ),
+    );
+    expect(found).toBe(true);
+  });
+
+  it('US-21: connect 例外時は error でなく warn ログ (リトライしないが致命的でない)', async () => {
+    const connect = vi.fn<() => Promise<VoiceConnectionHandle | null>>(() =>
+      Promise.reject(new Error('boom')),
+    );
+    const soundPlayer = { init: vi.fn(), stop: vi.fn() };
+    const timer = { getSnapshot: vi.fn(() => snapshot('idle')), stop: vi.fn() };
+    const resetToIdle = vi.fn<() => Promise<void>>(() => Promise.resolve());
+    const warnMock = logger.warn as unknown as ReturnType<typeof vi.fn>;
+    const errorMock = logger.error as unknown as ReturnType<typeof vi.fn>;
+    warnMock.mockClear();
+    errorMock.mockClear();
+    const vm = new VoiceManager({ logger, soundPlayer, timer, connect, resetToIdle });
+    await vm.handleHumanCountChange(1);
+    expect(warnMock).toHaveBeenCalled();
+    expect(errorMock).not.toHaveBeenCalled();
+  });
+
   it('ensureConnected: 未接続なら接続+init し true', async () => {
     const { vm, connect, connection, soundPlayer } = setup();
     const ok = await vm.ensureConnected();

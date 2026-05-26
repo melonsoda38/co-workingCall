@@ -156,7 +156,8 @@ export class VoiceManager {
     try {
       connection = await this.#connect();
     } catch (err) {
-      this.#logger.error({ err }, 'VC 接続に失敗しました');
+      // リトライしない (voice-spec) が致命的でもないため warn に統一 (US-21)。
+      this.#logger.warn({ err }, 'VC 接続に失敗しました (例外)');
       return false;
     }
     if (connection === null) {
@@ -170,6 +171,10 @@ export class VoiceManager {
 
   #onLeave(): void {
     this.#cancelEmptyTimeout();
+    this.#logger.info(
+      { timeoutMs: this.#emptyVcTimeoutMs },
+      '人間ゼロを検知。退出カウントダウンを開始 (この間に再入室があればキャンセル)',
+    );
     this.#emptyVcTimeout = setTimeout(() => {
       void this.#onEmptyTimeout();
     }, this.#emptyVcTimeoutMs);
