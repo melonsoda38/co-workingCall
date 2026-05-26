@@ -18,7 +18,7 @@ describe('scheduleEphemeralAutoDelete', () => {
     vi.useRealTimers();
   });
 
-  it('既定 6 時間後に deleteReply を呼ぶ', async () => {
+  it('既定 14 分後に deleteReply を呼ぶ', async () => {
     const deleteReply = vi.fn(() => Promise.resolve());
     scheduleEphemeralAutoDelete({ deleteReply, deferred: true, replied: false }, logger);
 
