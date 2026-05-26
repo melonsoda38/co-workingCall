@@ -2,7 +2,7 @@
 
 ## 概要
 このbotがユーザーに提供する操作インターフェースの仕様。
-- スラッシュコマンド: /pomo init (初期セットアップ)、/pomo stop・/pomo join (テスト用)、/pomo admin-role (許可ロール管理)
+- スラッシュコマンド: /pomo init (初期セットアップ + bot 入室)、/pomo stop (タイマー強制停止・テスト用)、/pomo admin-role (許可ロール管理)
 - Embedボタン: 通常運用の操作
 - Modal: 設定変更
 
@@ -58,8 +58,18 @@
 [スタート用Embed投稿]
   そのVC内蔵テキスト欄に新しい作業スタート用Embedを投稿
 
+[bot を VC に入室させる] (旧 /pomo join 相当・US-22 で init に統合)
+  稼働中セッションがあれば VoiceManager.ensureConnected() を呼ぶ
+  ├ 既に接続済み → no-op (冪等)
+  ├ 未接続 → join + SoundPlayer.init で VC 入室
+  └ 接続失敗 → ephemeral でエラー通知 (init 自体の config 保存は成功扱い)
+  セッションが無い場合 (初回 init、まだ setupVoiceFeature が走っていない)
+  は bot 再起動が必要な旨を案内
+
 [完了応答]
-  "セットアップ完了しました" (ユーザーにのみ見える ephemeral)
+  "セットアップ完了しました (bot が VC に入室済み)" (ephemeral)
+  ├ session 無 → "セットアップ完了しました。bot を再起動すると VC 自動入退室が有効化されます"
+  └ VC 接続失敗 → "セットアップ完了しましたが VC への接続に失敗しました..."
 ```
 
 #### エラーメッセージ
@@ -84,15 +94,7 @@
 - 動作: timer.stop() → VoiceManager.forceDisconnect() (VC退出) → EmbedManager.onIdle()
 - タイマー設定 (config.json) は保持する (リセットしない)
 - 成功時は確認メッセージを出さない (deferReply → deleteReply の無言確認)
-
-### /pomo join (テスト用)
-bot を対象 VC へ再入室させる (タイマーは開始しない)。/pomo stop で退出後、
-VC に居たまま bot を呼び戻す用途。
-- 実行場所: VC内蔵テキスト欄でのみ (それ以外は /pomo init と同じエラー文言で拒否)
-- 権限: adminRoleName (pomo-admin) ロール
-- 既に bot が VC に入室済みの場合は何もせず、実行者にのみ ephemeral でエラー通知
-- 未接続なら VoiceManager.ensureConnected() で接続
-- 成功時は確認メッセージを出さない (bot が VC に現れることで分かる)
+- 退出後に bot を再入室させたい場合は **/pomo init を再実行**する (旧 /pomo join は廃止)
 
 ### /pomo admin-role add / remove / list
 コマンド実行を許可する追加ロールを GUI のロール選択で管理する。

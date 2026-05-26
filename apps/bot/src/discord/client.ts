@@ -4,7 +4,6 @@ import {
   SETTINGS_MODAL_ID,
   handleAdminRole,
   handlePomoInit,
-  handlePomoJoin,
   handlePomoStop,
   handleSettingsButton,
   handleSettingsModalSubmit,
@@ -73,11 +72,9 @@ export async function startBot(token: string, logger: Logger, configPath: string
         if (group === 'admin-role') {
           void handleAdminRole(interaction, session, configPath, logger);
         } else if (sub === 'init') {
-          void handlePomoInit(interaction, configPath, logger);
+          void handlePomoInit(interaction, session, configPath, logger);
         } else if (sub === 'stop') {
           void handlePomoStop(interaction, session, logger);
-        } else if (sub === 'join') {
-          void handlePomoJoin(interaction, session, logger);
         }
       }
       return;
