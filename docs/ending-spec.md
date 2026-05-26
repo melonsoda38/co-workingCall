@@ -54,14 +54,18 @@ T+4秒     finish.mp3 再生終了
 2. 既存Embed削除
 3. "お疲れさまでした 👋" を通常メッセージとして投稿
    (SuppressNotifications 付けない、ちゃんと通知音を鳴らす)
+   投稿の messageId は後段で削除するため保持する
 4. finish.mp3 が鳴り終わるまで待機 (約4秒、余韻)
 5. VC内の全GuildMemberに対して voice.disconnect()
 6. bot即時退出 (カウントダウン経由しない)
    - voiceConnection.destroy()
    - emptyVcTimeoutTimer をキャンセル
-7. SessionState をリセット (詳細は後述)
-8. 新しい作業スタート用Embedを投稿 (SuppressNotifications)
-9. idle に戻る (process.exit しない)
+7. お疲れさま投稿を削除
+   - Embed なしのプレーンテキストなので purgeOwnEmbeds の対象外。明示削除する
+   - 削除失敗は best-effort (warn ログのみで継続)
+8. SessionState をリセット (詳細は後述)
+9. 新しい作業スタート用Embedを投稿 (SuppressNotifications)
+10. idle に戻る (process.exit しない)
 ```
 
 ## 強制退出の実装
@@ -161,10 +165,11 @@ ended処理の最後で以下をクリア:
 [ended] 突入
    ├ finish.mp3 再生開始
    ├ Embed削除
-   ├ "お疲れさまでした" 投稿 (通常通知)
+   ├ "お疲れさまでした" 投稿 (通常通知) ※ messageId 保持
    ├ 4秒待機
    ├ VC全員強制退出
    ├ bot即時退出
+   ├ "お疲れさまでした" 投稿を削除
    ├ SessionState リセット
    └ 新スタート用Embed投稿
    ↓

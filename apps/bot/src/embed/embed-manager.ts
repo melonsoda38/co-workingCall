@@ -218,8 +218,9 @@ export class EmbedManager {
       // 2. タイマー Embed 削除。
       await this.#deleteTimerEmbed();
       // 3. お疲れさま投稿 (通常通知・SuppressNotifications なし)。
-      await this.#channel.post(buildFarewellMessage());
-      this.#logger.info('お疲れさま投稿 完了');
+      //    Embed なしの単発テキストで、後でこの id を消すため戻り値を保持する。
+      const farewell = await this.#channel.post(buildFarewellMessage());
+      this.#logger.info({ messageId: farewell.id }, 'お疲れさま投稿 完了');
       // 4. finish.mp3 を最後まで聞かせる余韻待機。
       this.#logger.info({ ms: ENDING_DELAY_MS }, '余韻待機');
       await this.#endingDelay(ENDING_DELAY_MS);
@@ -239,9 +240,21 @@ export class EmbedManager {
           this.#logger.warn({ err }, 'bot の VC 退出に失敗 (best-effort)');
         }
       }
-      // 7. SessionState 相当のリセット (timer は ended で停止済み、updater/debouncer も既にクリア済み)。
+      // 7. お疲れさま投稿を削除 (新スタート Embed 投稿前にテキスト欄を整える)。
+      //    Embed なしのプレーンテキストは purgeOwnEmbeds の対象外なので明示削除する。
+      //    削除失敗は best-effort (warn のみ・後段の処理は継続)。
+      try {
+        await this.#channel.delete(farewell.id);
+        this.#logger.info({ messageId: farewell.id }, 'お疲れさま投稿を削除');
+      } catch (err) {
+        this.#logger.warn(
+          { err, messageId: farewell.id },
+          'お疲れさま投稿の削除に失敗 (best-effort)',
+        );
+      }
+      // 8. SessionState 相当のリセット (timer は ended で停止済み、updater/debouncer も既にクリア済み)。
       this.#currentPhase = 'idle';
-      // 8. 新スタート Embed 投稿 → idle に戻る。
+      // 9. 新スタート Embed 投稿 → idle に戻る。
       const posted = await this.#postFresh(buildStartEmbedMessage(this.#config));
       this.#startEmbedId = posted.id;
       this.#logger.info('終了演出フロー完了 idle 復帰');
