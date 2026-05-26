@@ -6,6 +6,7 @@ import { buildTimerEmbedContent, buildTimerEmbedMessage } from './timer-embed.js
 import { RepostDebouncer } from './repost-debouncer.js';
 import { TimerEmbedUpdater } from './timer-embed-updater.js';
 import { buildFarewellMessage } from './farewell-message.js';
+import { buildWelcomeMessage } from './welcome-message.js';
 import {
   playPhaseTransitionSound,
   phaseTransitionSound,
@@ -112,6 +113,12 @@ export class EmbedManager {
   #currentPhase: TimerPhase = 'idle';
   #startEmbedId: string | null = null;
   #timerEmbedId: string | null = null;
+  /**
+   * タイマー開始時の「ご参加ありがとう」投稿 ID。Embed なしプレーンテキストで
+   * purgeOwnEmbeds の対象外のため、終了演出 (onEnded) / 強制停止 (onIdle) で
+   * 明示的に delete する。
+   */
+  #welcomeMessageId: string | null = null;
   #updater: TimerEmbedUpdater | null = null;
   /** 終了演出の二重発火防止 (ended イベントと空 VC 退出など複数経路から起動し得る)。 */
   #isEnding = false;
@@ -148,6 +155,9 @@ export class EmbedManager {
   get timerEmbedId(): string | null {
     return this.#timerEmbedId;
   }
+  get welcomeMessageId(): string | null {
+    return this.#welcomeMessageId;
+  }
 
   /** idle: スタート用 Embed を投稿 (タイマー用・既存スタート用が残っていれば削除)。 */
   async onIdle(): Promise<void> {
@@ -156,13 +166,18 @@ export class EmbedManager {
     this.#debouncer.cancel();
     this.#currentPhase = 'idle';
     await this.#deleteTimerEmbed();
+    // /pomo stop など onEnded を経由しない経路でも welcome を残さない。
+    await this.#deleteWelcomeMessage();
     // 既存スタート Embed を消してから出し直す (/pomo stop の重複投稿防止・冪等化)。
     await this.#deleteStartEmbed();
     const posted = await this.#postFresh(buildStartEmbedMessage(this.#config));
     this.#startEmbedId = posted.id;
   }
 
-  /** タイマー開始: スタート削除 → タイマー用投稿 → 5秒更新開始。 */
+  /**
+   * タイマー開始: スタート削除 → タイマー用投稿 → 5秒更新開始 → 歓迎投稿。
+   * 歓迎投稿はタイマー Embed の後にチャンネル最下部へ置き、終了演出 / onIdle で削除する。
+   */
   async onTimerStart(): Promise<void> {
     this.#currentPhase = 'work';
     await this.#deleteStartEmbed();
@@ -170,6 +185,7 @@ export class EmbedManager {
     const posted = await this.#postFresh(buildTimerEmbedMessage(snapshot, this.#config));
     this.#timerEmbedId = posted.id;
     this.#startUpdater();
+    await this.#postWelcome();
   }
 
   /** 人間メッセージ検知: work/break/finalBreak のみデバウンス開始。 */
@@ -249,9 +265,9 @@ export class EmbedManager {
           this.#logger.warn({ err }, 'bot の VC 退出に失敗 (best-effort)');
         }
       }
-      // 7. お疲れさま投稿を削除 (新スタート Embed 投稿前にテキスト欄を整える)。
-      //    Embed なしのプレーンテキストは purgeOwnEmbeds の対象外なので明示削除する。
-      //    削除失敗は best-effort (warn のみ・後段の処理は継続)。
+      // 7. お疲れさま投稿 + ご参加ありがとう投稿を削除 (新スタート Embed 投稿前に
+      //    テキスト欄を整える)。Embed なしのプレーンテキストは purgeOwnEmbeds の
+      //    対象外なので明示削除する。削除失敗は best-effort (warn のみ・後段継続)。
       try {
         await this.#channel.delete(farewell.id);
         this.#logger.info({ messageId: farewell.id }, 'お疲れさま投稿を削除');
@@ -261,6 +277,7 @@ export class EmbedManager {
           'お疲れさま投稿の削除に失敗 (best-effort)',
         );
       }
+      await this.#deleteWelcomeMessage();
       // 8. SessionState 相当のリセット。
       //    PomodoroTimer は ended 到達で interval は停止するが #startedAt/#currentPhase='ended' を
       //    保持する設計のため、明示的に reset() を呼ばないと次の ▶開始で
@@ -394,6 +411,35 @@ export class EmbedManager {
       await this.#channel.delete(messageId);
     } catch (err) {
       this.#logger.warn({ err, messageId }, 'Embed 削除に失敗 (best-effort)');
+    }
+  }
+
+  /**
+   * 歓迎投稿を post し ID を保持する。
+   * 投稿失敗は best-effort (warn のみ): タイマー自体の進行を妨げないようにする。
+   */
+  async #postWelcome(): Promise<void> {
+    try {
+      const welcome = await this.#channel.post(buildWelcomeMessage());
+      this.#welcomeMessageId = welcome.id;
+      this.#logger.info({ messageId: welcome.id }, 'ご参加ありがとう投稿 完了');
+    } catch (err) {
+      this.#logger.warn({ err }, 'ご参加ありがとう投稿に失敗 (best-effort)');
+    }
+  }
+
+  /** 歓迎投稿を削除し ID をクリア。未投稿なら no-op。削除失敗は best-effort。 */
+  async #deleteWelcomeMessage(): Promise<void> {
+    if (this.#welcomeMessageId === null) {
+      return;
+    }
+    const id = this.#welcomeMessageId;
+    this.#welcomeMessageId = null;
+    try {
+      await this.#channel.delete(id);
+      this.#logger.info({ messageId: id }, 'ご参加ありがとう投稿を削除');
+    } catch (err) {
+      this.#logger.warn({ err, messageId: id }, 'ご参加ありがとう投稿の削除に失敗 (best-effort)');
     }
   }
 }
