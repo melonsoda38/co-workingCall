@@ -38,19 +38,22 @@ sudo apt update && sudo apt upgrade -y
 sudo apt install -y git curl build-essential
 ```
 
-### 4. Node.js 20 + pnpm のインストール
+### 4. Node.js 22 + pnpm のインストール
 ```
 # nvm のインストール
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
 source ~/.bashrc
 
-# Node.js 20 のインストール
-nvm install 20
-nvm use 20
-nvm alias default 20
+# Node.js 22 のインストール (DAVE 必須化により @discordjs/voice は Node>=22.12 が必要)
+nvm install 22
+nvm use 22
+# default を必ず実在バージョンに固定する。
+# lts/* など未導入バージョンを指していると nvm.sh のソースが非ゼロを返し、
+# `. nvm.sh && nvm use ...` の && 連結が短絡して system Node に落ちる事故が起きる。
+nvm alias default 22
 
-# pnpm のインストール
-npm install -g pnpm
+# pnpm は corepack で有効化する (packageManager 固定版が使われる。npm -g では入れない)
+corepack enable
 ```
 
 ### 5. 必須システムパッケージ
@@ -84,10 +87,12 @@ LOG_LEVEL=info
 
 ### 3. 動作確認
 ```
-pnpm --filter bot start
+./scripts/start-bot.sh
 ```
-エラーなくbot が Discord にログインできるか確認。
-Ctrl+C で停止。
+`scripts/start-bot.sh` は nvm をロードして Node 22 系を選択し (シェル状態や
+nvm の終了コードに依存しない)、Node が 22 未満なら明確なエラーで停止してから
+`corepack pnpm --filter bot start` を実行する堅牢なランチャ。
+エラーなく bot が Discord にログインできるか確認し、Ctrl+C で停止。
 
 ### 4. /pomo init で初期化
 Discord内のVCで `/pomo init` を実行 (pomo-admin ロール必要)。
@@ -109,8 +114,10 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/co-workingCall-bot/apps/bot
-ExecStart=%h/.nvm/versions/node/v20/bin/pnpm start
+WorkingDirectory=%h/co-workingCall-bot
+# Node のフルバージョンパスを直接書かない (nvm の patch 更新で壊れるため)。
+# ランチャが nvm ロード + Node 22 選択 + バージョン検証まで行う。
+ExecStart=%h/co-workingCall-bot/scripts/start-bot.sh
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
@@ -180,9 +187,10 @@ systemctl --user restart pomodoro-bot.service
 
 ### サービスが起動しない
 - `journalctl --user -u pomodoro-bot.service -n 50` でログ確認
-- WorkingDirectory のパス、ExecStart のパスが正しいか確認
-- nvm の Node.js パスが %h/.nvm/versions/node/v20/bin/pnpm で
-  実際に存在するか確認 (`which pnpm`)
+- WorkingDirectory のパス、ExecStart の `scripts/start-bot.sh` が存在し実行権限が
+  あるか確認 (`ls -l scripts/start-bot.sh`、なければ `chmod +x scripts/start-bot.sh`)
+- ランチャが「Node 22 以上が必要」で停止する場合は `nvm install 22` と
+  `nvm alias default 22` を実行 (default が未導入版を指していると起動が不安定になる)
 
 ## セキュリティ
 
