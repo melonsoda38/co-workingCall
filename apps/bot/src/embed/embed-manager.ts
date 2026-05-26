@@ -21,6 +21,12 @@ export interface EmbedChannel {
   post(options: MessageCreateOptions): Promise<PostedMessage>;
   edit(messageId: string, options: BaseMessageOptions): Promise<void>;
   delete(messageId: string): Promise<void>;
+  /**
+   * VCテキスト欄から bot 自身が投稿した過去の Embed 付きメッセージを掃除する。
+   * 新規 Embed 投稿の直前に呼び、追跡漏れ (異常終了・/pomo init 連打・旧VC残骸) も
+   * 含めて「テキスト欄に Embed は常に 1 つ」を保証する。best-effort。
+   */
+  purgeOwnEmbeds(): Promise<void>;
 }
 
 /** EmbedManager が必要とするタイマーの最小インターフェース (PomodoroTimer 互換)。 */
@@ -110,7 +116,7 @@ export class EmbedManager {
     await this.#deleteTimerEmbed();
     // 既存スタート Embed を消してから出し直す (/pomo stop の重複投稿防止・冪等化)。
     await this.#deleteStartEmbed();
-    const posted = await this.#channel.post(buildStartEmbedMessage(this.#config));
+    const posted = await this.#postFresh(buildStartEmbedMessage(this.#config));
     this.#startEmbedId = posted.id;
   }
 
@@ -119,7 +125,7 @@ export class EmbedManager {
     this.#currentPhase = 'work';
     await this.#deleteStartEmbed();
     const snapshot = this.#timer.getSnapshot();
-    const posted = await this.#channel.post(buildTimerEmbedMessage(snapshot, this.#config));
+    const posted = await this.#postFresh(buildTimerEmbedMessage(snapshot, this.#config));
     this.#timerEmbedId = posted.id;
     this.#startUpdater();
   }
@@ -150,7 +156,7 @@ export class EmbedManager {
     this.#debouncer.cancel();
     this.#currentPhase = 'idle';
     await this.#deleteTimerEmbed();
-    const posted = await this.#channel.post(buildStartEmbedMessage(this.#config));
+    const posted = await this.#postFresh(buildStartEmbedMessage(this.#config));
     this.#startEmbedId = posted.id;
   }
 
@@ -207,8 +213,18 @@ export class EmbedManager {
   async #repostTimerEmbed(): Promise<void> {
     await this.#deleteTimerEmbed();
     const snapshot = this.#timer.getSnapshot();
-    const posted = await this.#channel.post(buildTimerEmbedMessage(snapshot, this.#config));
+    const posted = await this.#postFresh(buildTimerEmbedMessage(snapshot, this.#config));
     this.#timerEmbedId = posted.id;
+  }
+
+  /**
+   * 新規 Embed 投稿の共通入口。直前に purgeOwnEmbeds で過去 Embed を掃除してから post。
+   * これで「テキスト欄に bot 自身の Embed は常に 1 つ」を保証する。
+   * id 追跡 (#startEmbedId / #timerEmbedId) と purge による掃除の二重防御。
+   */
+  async #postFresh(options: MessageCreateOptions): Promise<PostedMessage> {
+    await this.#channel.purgeOwnEmbeds();
+    return this.#channel.post(options);
   }
 
   #startUpdater(): void {

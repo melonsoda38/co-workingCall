@@ -49,7 +49,11 @@ class FakeTimer implements TimerLike {
 
 function fakeChannel() {
   let n = 0;
+  // post 呼び出しの直前に purgeOwnEmbeds が呼ばれているかを order で検証するため、
+  // 共通の calls 配列に名前を記録する。
+  const calls: string[] = [];
   const post = vi.fn<() => Promise<PostedMessage>>(() => {
+    calls.push('post');
     n += 1;
     return Promise.resolve({ id: `m${String(n)}` });
   });
@@ -57,8 +61,12 @@ function fakeChannel() {
     Promise.resolve(),
   );
   const del = vi.fn<(messageId: string) => Promise<void>>(() => Promise.resolve());
-  const channel: EmbedChannel = { post, edit, delete: del };
-  return { channel, post, edit, del };
+  const purgeOwnEmbeds = vi.fn<() => Promise<void>>(() => {
+    calls.push('purge');
+    return Promise.resolve();
+  });
+  const channel: EmbedChannel = { post, edit, delete: del, purgeOwnEmbeds };
+  return { channel, post, edit, del, purgeOwnEmbeds, calls };
 }
 
 function fakeSound() {
@@ -104,6 +112,27 @@ describe('EmbedManager', () => {
     await m.onIdle();
     expect(post).toHaveBeenCalledTimes(1);
     expect(m.startEmbedId).toBe('m1');
+  });
+
+  it('post の直前に purgeOwnEmbeds を呼ぶ (テキスト欄の Embed を 1 つに保つ)', async () => {
+    const { channel, purgeOwnEmbeds, calls } = fakeChannel();
+    const timer = new FakeTimer();
+    const m = new EmbedManager({ channel, timer, config, logger });
+    await m.onIdle(); // post: スタート Embed
+    timer.emit('phaseChange', makeSnapshot('work')); // post: タイマー Embed
+    await vi.advanceTimersByTimeAsync(0);
+    timer.emit('phaseChange', makeSnapshot('break')); // post: 再投稿
+    await vi.advanceTimersByTimeAsync(0);
+    timer.emit('ended', makeSnapshot('ended')); // post: スタート Embed
+    await vi.advanceTimersByTimeAsync(0);
+
+    // 4 回 post したなら 4 回 purge も走り、順序は常に purge→post
+    expect(purgeOwnEmbeds).toHaveBeenCalledTimes(4);
+    const pairs = calls.reduce<string[]>((acc, c, i) => {
+      if (c === 'post') acc.push(`${calls[i - 1] ?? ''}->post`);
+      return acc;
+    }, []);
+    expect(pairs.every((p) => p === 'purge->post')).toBe(true);
   });
 
   it('onIdle 再実行は既存スタート Embed を削除してから出し直す (冪等)', async () => {

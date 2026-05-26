@@ -8,6 +8,7 @@ import {
 import type { Logger } from 'pino';
 import type { BotConfig } from '@co-working-call/shared';
 import { loadConfig, saveConfig } from '../config/index.js';
+import { purgeOwnEmbeds } from '../discord/purge-embeds.js';
 import { buildStartEmbedMessage } from '../embed/index.js';
 import type { VoiceSession } from '../voice/session-registry.js';
 import {
@@ -120,12 +121,10 @@ export async function handlePomoInit(
       return;
     }
 
-    // 旧 VC のスタート Embed 削除は best-effort。
-    // Embed メッセージ追跡は US-10 (EmbedManager) で実装するため現状はログのみ。
     if (existingConfig && existingConfig.voiceChannelId !== channel.id) {
       logger.info(
         { oldVoiceChannelId: existingConfig.voiceChannelId, newVoiceChannelId: channel.id },
-        '旧VCのスタートEmbed削除は US-10 で対応 (現状スキップ)',
+        'VC切替: 旧VCのスタートEmbedは新VC側のpurgeOwnEmbeds対象外。必要なら旧VCで手動削除を',
       );
     }
 
@@ -137,6 +136,9 @@ export async function handlePomoInit(
       adminRoleNames,
     };
     await saveConfig(configPath, config);
+    // 新規スタート Embed 投稿の直前に、対象 VC テキスト欄から bot 自身の過去 Embed を掃除
+    // (init 連打や前回起動の追跡漏れも含めてテキスト欄を 1 Embed に保つ)。
+    await purgeOwnEmbeds(channel, interaction.client.user.id, logger);
     await channel.send(buildStartEmbedMessage(config));
 
     await interaction.editReply('セットアップ完了しました');

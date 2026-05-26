@@ -34,6 +34,7 @@ function fakeChannel(): EmbedChannel {
     }),
     edit: vi.fn<(messageId: string, options: unknown) => Promise<void>>(() => Promise.resolve()),
     delete: vi.fn<(messageId: string) => Promise<void>>(() => Promise.resolve()),
+    purgeOwnEmbeds: vi.fn<() => Promise<void>>(() => Promise.resolve()),
   };
 }
 
