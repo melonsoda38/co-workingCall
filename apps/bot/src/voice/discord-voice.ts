@@ -79,7 +79,7 @@ export async function setupVoiceFeature(
 
   const soundPlayer = createDiscordSoundPlayer(logger);
   const session = createPomodoroSession({
-    channel: createDiscordEmbedChannel(channel),
+    channel: createDiscordEmbedChannel(channel, logger),
     config,
     logger,
     soundPlayer,

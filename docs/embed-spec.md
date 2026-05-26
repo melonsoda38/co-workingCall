@@ -53,6 +53,19 @@
 全Embed投稿は MessageFlags.SuppressNotifications を必ず付ける。
 唯一の例外: 終了時の「お疲れさまでした」通知のみ通常送信。
 
+## VCテキスト欄は常に Embed 1 つに保つ
+新規 Embed 投稿の**直前**に、対象 VC 内蔵テキスト欄から bot 自身が投稿した
+Embed 付きメッセージを全て削除する (purgeOwnEmbeds)。これにより以下の追跡漏れを
+含めてテキスト欄に bot の Embed は常に 1 つだけ存在する状態を保つ:
+- bot 異常終了で `#startEmbedId` / `#timerEmbedId` がリセットされた残骸
+- `/pomo init` 連打で同一 VC に積まれた古いスタート Embed
+- その他追跡されていない古い Embed
+
+対象: bot 自身が投稿した・Embed を含むメッセージのみ (他 bot/人間や Embed なしの
+bot メッセージは触らない)。fetch 上限 100 件、削除は best-effort (個別失敗は warn のみ)。
+呼び出し箇所は `EmbedManager` の post を全て `#postFresh` (purge→post) でラップし、
+`/pomo init` の直接投稿経路でも明示呼び出しする。
+
 ## 各フェーズでのEmbed動作
 
 | フェーズ    | 表示中Embed       | Embed更新     | 自動削除&再投稿 | 切替時挙動  |
