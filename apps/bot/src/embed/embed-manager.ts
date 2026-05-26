@@ -182,6 +182,7 @@ export class EmbedManager {
       return;
     }
     this.#currentPhase = 'countdown';
+    this.#logger.info('countdown 突入: 終了予告音を再生し 5秒更新を停止');
     this.#soundNotifier?.playCountdownWarning();
     this.#debouncer.cancel();
     this.#updater?.stop();
@@ -202,31 +203,38 @@ export class EmbedManager {
    */
   async onEnded(): Promise<void> {
     if (this.#isEnding) {
+      this.#logger.debug('ended 二重発火を握りつぶし (#isEnding ガード)');
       return;
     }
     this.#isEnding = true;
+    this.#logger.info('終了演出フロー開始 (ending-spec §第二段階)');
     this.#updater?.stop();
     this.#updater = null;
     this.#debouncer.cancel();
     try {
       // 1. 終了音 (4 秒、非同期で開始)。
+      this.#logger.info('finish.mp3 再生開始');
       this.#soundNotifier?.playFinish();
       // 2. タイマー Embed 削除。
       await this.#deleteTimerEmbed();
       // 3. お疲れさま投稿 (通常通知・SuppressNotifications なし)。
       await this.#channel.post(buildFarewellMessage());
+      this.#logger.info('お疲れさま投稿 完了');
       // 4. finish.mp3 を最後まで聞かせる余韻待機。
+      this.#logger.info({ ms: ENDING_DELAY_MS }, '余韻待機');
       await this.#endingDelay(ENDING_DELAY_MS);
       // 5. VC 内の人間メンバー全員を強制退出 (未注入ならスキップ)。
       if (this.#endingActions) {
         try {
           await this.#endingActions.kickAllHumans();
+          this.#logger.info('VC 全員強制退出 完了');
         } catch (err) {
           this.#logger.warn({ err }, 'VC 全員強制退出に失敗 (best-effort)');
         }
         // 6. bot 自身を即時退出 (カウントダウン経由しない)。
         try {
           this.#endingActions.disconnectBot();
+          this.#logger.info('bot VC 退出 完了');
         } catch (err) {
           this.#logger.warn({ err }, 'bot の VC 退出に失敗 (best-effort)');
         }
@@ -236,6 +244,7 @@ export class EmbedManager {
       // 8. 新スタート Embed 投稿 → idle に戻る。
       const posted = await this.#postFresh(buildStartEmbedMessage(this.#config));
       this.#startEmbedId = posted.id;
+      this.#logger.info('終了演出フロー完了 idle 復帰');
     } finally {
       this.#isEnding = false;
     }
@@ -277,12 +286,14 @@ export class EmbedManager {
 
     if (this.#timerEmbedId === null) {
       // 初回 (idle→work): スタート削除 → タイマー投稿 (通知音なし)。
+      this.#logger.info({ to, currentSet: snapshot.currentSet }, 'タイマー初回フェーズ突入');
       await this.onTimerStart();
       return;
     }
 
     // 中間切替 (work↔break, work→finalBreak) の強制リセット (embed-spec §フェーズ切替):
     // 1. 通知音 → 2-3. 旧Embed削除&新Embed投稿 → 4. デバウンスclear → 5. 5秒更新リセット。
+    this.#logger.info({ from, to, currentSet: snapshot.currentSet }, 'フェーズ切替');
     if (this.#soundNotifier) {
       playPhaseTransitionSound(this.#soundNotifier, phaseTransitionSound(from, to));
     }
