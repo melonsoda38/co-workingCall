@@ -156,15 +156,15 @@ VC に居たまま bot を呼び戻す用途。
 
 フィールド1: 作業時間（分）
   type: TextInput, style: Short, required: true
-  placeholder: "25", min_length: 1, max_length: 3
+  placeholder: "50", min_length: 1, max_length: 3
 
 フィールド2: 休憩時間（分）
   type: TextInput, style: Short, required: true
-  placeholder: "5", min_length: 1, max_length: 3
+  placeholder: "10", min_length: 1, max_length: 3
 
 フィールド3: セット数
   type: TextInput, style: Short, required: true
-  placeholder: "4", min_length: 1, max_length: 2
+  placeholder: "2", min_length: 1, max_length: 2
 
 フィールド4: 最終休憩（分）
   type: TextInput, style: Short, required: true
