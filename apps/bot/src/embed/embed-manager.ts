@@ -5,11 +5,34 @@ import { buildStartEmbedMessage } from './start-embed.js';
 import { buildTimerEmbedContent, buildTimerEmbedMessage } from './timer-embed.js';
 import { RepostDebouncer } from './repost-debouncer.js';
 import { TimerEmbedUpdater } from './timer-embed-updater.js';
+import { buildFarewellMessage } from './farewell-message.js';
 import {
   playPhaseTransitionSound,
   phaseTransitionSound,
   type PhaseSoundNotifier,
 } from './sound-notifier.js';
+
+/** ending-spec の余韻待機時間 (finish.mp3 を最後まで聞かせる)。 */
+export const ENDING_DELAY_MS = 4_000;
+
+/**
+ * 終了演出 (US-19) で EmbedManager が呼ぶ外部操作 (VC 系の責務)。
+ * 注入により EmbedManager を Discord 非依存に保つ。未注入なら no-op。
+ */
+export interface EndingActions {
+  /** VC 内の人間メンバー全員を切断する (順次 await、失敗は best-effort)。 */
+  kickAllHumans(): Promise<void>;
+  /** bot 自身を即時退出させる (VoiceManager.forceDisconnect 相当)。 */
+  disconnectBot(): void;
+}
+
+/** 4 秒待機などの遅延関数。テストで vi.useFakeTimers と差し替えるための注入点。 */
+export type EndingDelay = (ms: number) => Promise<void>;
+
+const defaultEndingDelay: EndingDelay = (ms) =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 
 /** 投稿済みメッセージ (id のみ必要)。 */
 export interface PostedMessage {
@@ -43,8 +66,12 @@ export interface EmbedManagerDeps {
   timer: TimerLike;
   config: BotConfig;
   logger: Logger;
-  /** フェーズ切替の通知音 (US-15 で実 SoundPlayer を注入。未指定なら無音)。 */
+  /** フェーズ切替・終了予告・終了音の通知音 (US-15 で実 SoundPlayer を注入。未指定なら無音)。 */
   soundNotifier?: PhaseSoundNotifier;
+  /** 終了演出 (US-19) で呼ぶ VC 系外部操作。未指定なら kick/退出はスキップ (テスト用)。 */
+  endingActions?: EndingActions;
+  /** 余韻待機関数 (テスト差し替え用、既定は setTimeout)。 */
+  endingDelay?: EndingDelay;
 }
 
 /**
@@ -71,10 +98,14 @@ export class EmbedManager {
   readonly #logger: Logger;
   readonly #debouncer: RepostDebouncer;
   readonly #soundNotifier: PhaseSoundNotifier | undefined;
+  readonly #endingActions: EndingActions | undefined;
+  readonly #endingDelay: EndingDelay;
   #currentPhase: TimerPhase = 'idle';
   #startEmbedId: string | null = null;
   #timerEmbedId: string | null = null;
   #updater: TimerEmbedUpdater | null = null;
+  /** 終了演出の二重発火防止 (ended イベントと空 VC 退出など複数経路から起動し得る)。 */
+  #isEnding = false;
 
   constructor(deps: EmbedManagerDeps) {
     this.#channel = deps.channel;
@@ -82,6 +113,8 @@ export class EmbedManager {
     this.#config = deps.config;
     this.#logger = deps.logger;
     this.#soundNotifier = deps.soundNotifier;
+    this.#endingActions = deps.endingActions;
+    this.#endingDelay = deps.endingDelay ?? defaultEndingDelay;
     this.#debouncer = new RepostDebouncer({
       callback: () => this.#repostTimerEmbed(),
       onError: (err) => {
@@ -158,15 +191,54 @@ export class EmbedManager {
     }
   }
 
-  /** ended: タイマー用削除 → スタート用投稿 → 状態クリア (音/VC 退出は US-19)。 */
+  /**
+   * ended: 終了演出フロー (ending-spec §第二段階・US-19)。
+   * finish.mp3 → タイマー Embed 削除 → お疲れさま投稿 → 4秒余韻 →
+   * VC 全員強制退出 → bot 退出 → 新スタート Embed 投稿 → idle 復帰。
+   *
+   * 二重発火防止 (#isEnding): ended イベント + 空 VC 1 分退出など複数経路から
+   * 同時起動し得るため、最初の 1 回のみ通す。
+   * エラー時も必ず #isEnding を解除し、可能なら idle 復帰 (スタート Embed 再投稿) を試みる。
+   */
   async onEnded(): Promise<void> {
+    if (this.#isEnding) {
+      return;
+    }
+    this.#isEnding = true;
     this.#updater?.stop();
     this.#updater = null;
     this.#debouncer.cancel();
-    this.#currentPhase = 'idle';
-    await this.#deleteTimerEmbed();
-    const posted = await this.#postFresh(buildStartEmbedMessage(this.#config));
-    this.#startEmbedId = posted.id;
+    try {
+      // 1. 終了音 (4 秒、非同期で開始)。
+      this.#soundNotifier?.playFinish();
+      // 2. タイマー Embed 削除。
+      await this.#deleteTimerEmbed();
+      // 3. お疲れさま投稿 (通常通知・SuppressNotifications なし)。
+      await this.#channel.post(buildFarewellMessage());
+      // 4. finish.mp3 を最後まで聞かせる余韻待機。
+      await this.#endingDelay(ENDING_DELAY_MS);
+      // 5. VC 内の人間メンバー全員を強制退出 (未注入ならスキップ)。
+      if (this.#endingActions) {
+        try {
+          await this.#endingActions.kickAllHumans();
+        } catch (err) {
+          this.#logger.warn({ err }, 'VC 全員強制退出に失敗 (best-effort)');
+        }
+        // 6. bot 自身を即時退出 (カウントダウン経由しない)。
+        try {
+          this.#endingActions.disconnectBot();
+        } catch (err) {
+          this.#logger.warn({ err }, 'bot の VC 退出に失敗 (best-effort)');
+        }
+      }
+      // 7. SessionState 相当のリセット (timer は ended で停止済み、updater/debouncer も既にクリア済み)。
+      this.#currentPhase = 'idle';
+      // 8. 新スタート Embed 投稿 → idle に戻る。
+      const posted = await this.#postFresh(buildStartEmbedMessage(this.#config));
+      this.#startEmbedId = posted.id;
+    } finally {
+      this.#isEnding = false;
+    }
   }
 
   /** 設定変更時にスタート用 Embed の内容を更新する (US-12)。 */

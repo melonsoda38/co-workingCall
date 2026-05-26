@@ -1,7 +1,12 @@
 import type { BotConfig } from '@co-working-call/shared';
 import type { Logger } from 'pino';
 import type { SoundPlayer } from '../audio/sound-player.js';
-import { EmbedManager, type EmbedChannel } from '../embed/embed-manager.js';
+import {
+  EmbedManager,
+  type EmbedChannel,
+  type EndingActions,
+  type EndingDelay,
+} from '../embed/embed-manager.js';
 import { PomodoroTimer } from '../timer/pomodoro-timer.js';
 
 /**
@@ -21,8 +26,12 @@ export interface PomodoroSessionDeps {
   channel: EmbedChannel;
   config: BotConfig;
   logger: Logger;
-  /** フェーズ切替音を鳴らす SoundPlayer (本番は createDiscordSoundPlayer で生成)。 */
+  /** フェーズ切替・終了予告・終了音を鳴らす SoundPlayer (本番は createDiscordSoundPlayer)。 */
   soundPlayer: SoundPlayer;
+  /** 終了演出 (US-19) の VC 操作 (kick/退出)。未指定なら ended でも VC 操作なし。 */
+  endingActions?: EndingActions;
+  /** 余韻待機関数 (テスト差し替え用)。 */
+  endingDelay?: EndingDelay;
 }
 
 /**
@@ -39,6 +48,8 @@ export function createPomodoroSession(deps: PomodoroSessionDeps): PomodoroSessio
     config: deps.config,
     logger: deps.logger,
     soundNotifier: deps.soundPlayer,
+    endingActions: deps.endingActions,
+    endingDelay: deps.endingDelay,
   });
   return { timer, soundPlayer: deps.soundPlayer, embedManager };
 }

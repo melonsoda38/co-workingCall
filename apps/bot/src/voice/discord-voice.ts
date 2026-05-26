@@ -4,6 +4,7 @@ import type { Logger } from 'pino';
 import type { BotConfig } from '@co-working-call/shared';
 import { createDiscordSoundPlayer } from '../audio/index.js';
 import { createDiscordEmbedChannel } from '../discord/discord-embed-channel.js';
+import type { EndingActions } from '../embed/index.js';
 import { createPomodoroSession } from '../session/index.js';
 import type { VoiceSessionRegistry } from './session-registry.js';
 import { VoiceManager, isTargetVcEvent, type VoiceConnectionHandle } from './voice-manager.js';
@@ -29,6 +30,24 @@ function connectToVc(channel: VoiceChannel, logger: Logger): VoiceConnectionHand
   } catch (err) {
     logger.error({ err }, 'joinVoiceChannel に失敗しました');
     return null;
+  }
+}
+
+/**
+ * VC 内の人間メンバー全員を切断する (ending-spec §強制退出の実装)。
+ * 順次 await + best-effort (個別失敗は warn ログのみ)。bot 自身は最後に
+ * VoiceManager.forceDisconnect で切る (本関数では触らない)。
+ */
+async function kickAllHumansFromVc(channel: VoiceChannel, logger: Logger): Promise<void> {
+  for (const [, member] of channel.members) {
+    if (member.user.bot) {
+      continue;
+    }
+    try {
+      await member.voice.disconnect();
+    } catch (err) {
+      logger.warn({ err, userId: member.id }, 'メンバーの強制退出に失敗 (best-effort)');
+    }
   }
 }
 
@@ -78,11 +97,22 @@ export async function setupVoiceFeature(
   }
 
   const soundPlayer = createDiscordSoundPlayer(logger);
+  // VoiceManager と EmbedManager は相互参照する (endingActions.disconnectBot →
+  // voiceManager.forceDisconnect)。順序解決のため ref オブジェクトで遅延参照する。
+  // 実行時 (onEnded 発火時) には voiceManagerRef.current が代入済みで安全。
+  const voiceManagerRef: { current: VoiceManager | null } = { current: null };
+  const endingActions: EndingActions = {
+    kickAllHumans: () => kickAllHumansFromVc(channel, logger),
+    disconnectBot: () => {
+      voiceManagerRef.current?.forceDisconnect();
+    },
+  };
   const session = createPomodoroSession({
     channel: createDiscordEmbedChannel(channel, logger),
     config,
     logger,
     soundPlayer,
+    endingActions,
   });
   const voiceManager = new VoiceManager({
     logger,
@@ -91,6 +121,7 @@ export async function setupVoiceFeature(
     connect: () => Promise.resolve(connectToVc(channel, logger)),
     resetToIdle: () => session.embedManager.onIdle(),
   });
+  voiceManagerRef.current = voiceManager;
 
   client.on(Events.VoiceStateUpdate, (oldState, newState) => {
     handleVoiceStateUpdate(oldState, newState, channel, config.voiceChannelId, voiceManager);
