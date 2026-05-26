@@ -38,7 +38,7 @@ Pi起動 → systemd が bot 起動
    → タイマー実行 (work → break → ... → finalBreak → countdown)
    ↓
 [タイマー終了 (ended)]
-  finish.mp3 → Embed削除 → お疲れさま投稿 → 4秒待機
+  finish.mp3 → Embed削除 → お疲れさま投稿 → 3秒待機
   → VC全員強制退出 → bot即時退出 (CD無し) → スタートEmbed投稿 → idle
    ↓
 [人間ゼロ30秒継続] → bot自動退出 (タイマー中なら停止 + 終了処理 → 退出)

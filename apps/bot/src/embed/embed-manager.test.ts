@@ -427,8 +427,8 @@ describe('EmbedManager 終了演出フロー (US-19)', () => {
     // お疲れさま投稿が post される (SuppressNotifications なし = flags 未指定)。
     const farewellCall = post.mock.calls.find((c) => c[0].content === 'お疲れさまでした 👋');
     expect(farewellCall).toBeDefined();
-    // 余韻 4 秒の delay が呼ばれる。
-    expect(delaySeq).toEqual([4_000]);
+    // 余韻 3 秒の delay が呼ばれる。
+    expect(delaySeq).toEqual([3_000]);
     // VC 全員強制退出 → bot 退出の順。
     expect(ending.kickAllHumans).toHaveBeenCalledTimes(1);
     expect(ending.disconnectBot).toHaveBeenCalledTimes(1);

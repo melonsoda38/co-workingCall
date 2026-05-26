@@ -12,8 +12,11 @@ import {
   type PhaseSoundNotifier,
 } from './sound-notifier.js';
 
-/** ending-spec の余韻待機時間 (finish.mp3 を最後まで聞かせる)。 */
-export const ENDING_DELAY_MS = 4_000;
+/**
+ * ending-spec の余韻待機時間 (お疲れさま投稿から VC 全員強制退出までの間隔)。
+ * finish.mp3 は 4 秒の音源だが、待機 3 秒に短縮しているため再生途中で disconnect する。
+ */
+export const ENDING_DELAY_MS = 3_000;
 
 /**
  * 終了演出 (US-19) で EmbedManager が呼ぶ外部操作 (VC 系の責務)。
@@ -26,7 +29,7 @@ export interface EndingActions {
   disconnectBot(): void;
 }
 
-/** 4 秒待機などの遅延関数。テストで vi.useFakeTimers と差し替えるための注入点。 */
+/** 余韻待機などの遅延関数 (本番は ENDING_DELAY_MS=3秒)。テストで vi.useFakeTimers と差し替えるための注入点。 */
 export type EndingDelay = (ms: number) => Promise<void>;
 
 const defaultEndingDelay: EndingDelay = (ms) =>
@@ -194,7 +197,7 @@ export class EmbedManager {
 
   /**
    * ended: 終了演出フロー (ending-spec §第二段階・US-19)。
-   * finish.mp3 → タイマー Embed 削除 → お疲れさま投稿 → 4秒余韻 →
+   * finish.mp3 → タイマー Embed 削除 → お疲れさま投稿 → 3秒余韻 →
    * VC 全員強制退出 → bot 退出 → 新スタート Embed 投稿 → idle 復帰。
    *
    * 二重発火防止 (#isEnding): ended イベント + 空 VC 30 秒退出など複数経路から
