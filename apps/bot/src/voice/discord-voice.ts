@@ -120,7 +120,7 @@ export async function setupVoiceFeature(
     timer: session.timer,
     connect: () => Promise.resolve(connectToVc(channel, logger)),
     resetToIdle: () => session.embedManager.onIdle(),
-    // US-20: 空 VC 1 分 + タイマー実行中の経路。timer を先に止めてから US-19 の
+    // US-20: 空 VC 30 秒 + タイマー実行中の経路。timer を先に止めてから US-19 の
     // 終了演出フロー (EmbedManager.onEnded) を直接駆動する。
     triggerEndingFlow: async () => {
       session.timer.stop();

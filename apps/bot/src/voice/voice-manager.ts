@@ -2,8 +2,8 @@ import type { Logger } from 'pino';
 import type { TimerPhase, TimerSnapshot } from '@co-working-call/shared';
 import type { AudioPlayerLike } from '../audio/sound-player.js';
 
-/** 空 VC からの自動退出までの猶予 (voice-spec: 1 分)。 */
-export const EMPTY_VC_TIMEOUT_MS = 60_000;
+/** 空 VC からの自動退出までの猶予 (voice-spec: 30 秒)。 */
+export const EMPTY_VC_TIMEOUT_MS = 30_000;
 
 /** 人間メンバー数の状態遷移 (voice-spec トリガー)。 */
 export type HumanCountTransition = 'enter' | 'leave' | 'none';
@@ -66,19 +66,19 @@ export interface VoiceManagerDeps {
   /** 退出時に idle へ戻す (embedManager.onIdle 相当、暗定復帰)。 */
   resetToIdle: () => Promise<void>;
   /**
-   * タイマー実行中の空 VC 1 分タイムアウトで発動する終了演出フロー (US-20)。
+   * タイマー実行中の空 VC 30 秒タイムアウトで発動する終了演出フロー (US-20)。
    * 本番では timer.stop() + embedManager.onEnded() のラッパ。未注入なら従来の
    * 暗定復帰 (resetToIdle) にフォールバック。
    */
   triggerEndingFlow?: () => Promise<void>;
-  /** 空 VC 退出までの猶予 (既定 60 秒、テスト差し替え用)。 */
+  /** 空 VC 退出までの猶予 (既定 30 秒、テスト差し替え用)。 */
   emptyVcTimeoutMs?: number;
 }
 
 /**
  * 人間ユーザーの VC 入退室に連動して bot を自動入退室させる (voice-spec)。
  * タイマー状態とは独立に動き、入室で SoundPlayer を VC に接続、全員退出から
- * 1 分後に退出する。discord.js 依存は注入で排除し単体テスト可能にしている。
+ * 30 秒後に退出する。discord.js 依存は注入で排除し単体テスト可能にしている。
  */
 export class VoiceManager {
   readonly #logger: Logger;
@@ -118,7 +118,7 @@ export class VoiceManager {
     }
   }
 
-  /** ended 処理等からの即時退出 (1 分カウントダウンを待たない)。US-19 で使用。 */
+  /** ended 処理等からの即時退出 (30 秒カウントダウンを待たない)。US-19 で使用。 */
   forceDisconnect(): void {
     this.#cancelEmptyTimeout();
     this.#disconnect();
