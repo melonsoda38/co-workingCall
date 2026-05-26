@@ -1,13 +1,17 @@
 import type { TimerPhase } from '@co-working-call/shared';
 
 /**
- * フェーズ切替系の通知音 (audio-spec SoundPlayer 指針のサブセット)。
- * 実装 (実 @discordjs/voice 再生) は US-15 の SoundPlayer。US-11 は注入のみ。
+ * フェーズ切替系 + 終了予告の通知音 (audio-spec SoundPlayer 指針のサブセット)。
+ * 実装 (実 @discordjs/voice 再生) は US-15 の SoundPlayer。
+ * - playWorkEnd / playBreakEnd / playFinalStart … フェーズ切替 (US-11)
+ * - playCountdownWarning … 終了予告 (US-18、countdown 突入時に 1 回)
+ * 終了音 (finish.mp3) は US-19 で別途扱う。
  */
 export interface PhaseSoundNotifier {
   playWorkEnd(): void;
   playBreakEnd(): void;
   playFinalStart(): void;
+  playCountdownWarning(): void;
 }
 
 export type PhaseTransitionSound = 'workEnd' | 'breakEnd' | 'finalStart' | null;
