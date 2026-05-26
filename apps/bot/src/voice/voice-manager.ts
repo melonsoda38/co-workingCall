@@ -1,5 +1,5 @@
 import type { Logger } from 'pino';
-import type { TimerSnapshot } from '@co-working-call/shared';
+import type { TimerPhase, TimerSnapshot } from '@co-working-call/shared';
 import type { AudioPlayerLike } from '../audio/sound-player.js';
 
 /** 空 VC からの自動退出までの猶予 (voice-spec: 1 分)。 */
@@ -52,6 +52,11 @@ export interface VoiceTimerControl {
   stop(): void;
 }
 
+/** タイマーが「実行中」(終了演出を発動すべき状態) かを判定する純関数 (US-20)。 */
+export function isTimerRunning(phase: TimerPhase): boolean {
+  return phase === 'work' || phase === 'break' || phase === 'finalBreak' || phase === 'countdown';
+}
+
 export interface VoiceManagerDeps {
   logger: Logger;
   soundPlayer: VoiceSoundPlayer;
@@ -60,6 +65,12 @@ export interface VoiceManagerDeps {
   connect: () => Promise<VoiceConnectionHandle | null>;
   /** 退出時に idle へ戻す (embedManager.onIdle 相当、暗定復帰)。 */
   resetToIdle: () => Promise<void>;
+  /**
+   * タイマー実行中の空 VC 1 分タイムアウトで発動する終了演出フロー (US-20)。
+   * 本番では timer.stop() + embedManager.onEnded() のラッパ。未注入なら従来の
+   * 暗定復帰 (resetToIdle) にフォールバック。
+   */
+  triggerEndingFlow?: () => Promise<void>;
   /** 空 VC 退出までの猶予 (既定 60 秒、テスト差し替え用)。 */
   emptyVcTimeoutMs?: number;
 }
@@ -75,6 +86,7 @@ export class VoiceManager {
   readonly #timer: VoiceTimerControl;
   readonly #connect: () => Promise<VoiceConnectionHandle | null>;
   readonly #resetToIdle: () => Promise<void>;
+  readonly #triggerEndingFlow: (() => Promise<void>) | undefined;
   readonly #emptyVcTimeoutMs: number;
 
   #humanCount = 0;
@@ -87,6 +99,7 @@ export class VoiceManager {
     this.#timer = deps.timer;
     this.#connect = deps.connect;
     this.#resetToIdle = deps.resetToIdle;
+    this.#triggerEndingFlow = deps.triggerEndingFlow;
     this.#emptyVcTimeoutMs = deps.emptyVcTimeoutMs ?? EMPTY_VC_TIMEOUT_MS;
   }
 
@@ -164,8 +177,23 @@ export class VoiceManager {
 
   async #onEmptyTimeout(): Promise<void> {
     this.#emptyVcTimeout = null;
-    // タイマー実行中なら停止 (完全な終了演出は US-19 で差し替え)。
-    if (this.#timer.getSnapshot().phase !== 'idle') {
+    const phase = this.#timer.getSnapshot().phase;
+
+    // US-20: タイマー実行中なら US-19 の終了演出フローを発動する (ending-spec §VC人間ゼロ起因)。
+    // triggerEndingFlow 内で timer.stop + finish.mp3 + お疲れさま投稿 + 4秒待機 +
+    // VC全員強制退出 + bot退出 + 新スタートEmbed + idle 復帰 まで一括で実行する。
+    if (isTimerRunning(phase) && this.#triggerEndingFlow) {
+      try {
+        await this.#triggerEndingFlow();
+      } catch (err) {
+        this.#logger.error({ err }, '空 VC 経由の終了演出に失敗しました');
+      }
+      this.#logger.info('人間ゼロが継続したため終了演出を発動しました');
+      return;
+    }
+
+    // idle (またはフロー未注入) は従来通り暗定復帰: timer 停止 → 切断 → idle 復帰。
+    if (phase !== 'idle') {
       this.#timer.stop();
     }
     this.#disconnect();
