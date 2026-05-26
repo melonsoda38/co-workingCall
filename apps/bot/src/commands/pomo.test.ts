@@ -3,7 +3,8 @@ import { ChannelType, type ChatInputCommandInteraction } from 'discord.js';
 import type { Logger } from 'pino';
 import type { BotConfig } from '@co-working-call/shared';
 import type { VoiceSession } from '../voice/session-registry.js';
-import { handleAdminRole, handlePomoJoin, handlePomoStop } from './pomo.js';
+import { PermissionFlagsBits } from 'discord.js';
+import { handleAdminRole, handlePomoJoin, handlePomoStop, pomoCommand } from './pomo.js';
 
 vi.mock('../config/index.js', () => ({ loadConfig: vi.fn(), saveConfig: vi.fn() }));
 import { loadConfig, saveConfig } from '../config/index.js';
@@ -70,6 +71,13 @@ function makeSession(opts?: { connected?: boolean; alreadyConnected?: boolean })
   } as unknown as VoiceSession;
   return { session, stop, onIdle, forceDisconnect, ensureConnected };
 }
+
+describe('pomoCommand', () => {
+  it('コマンド一覧の可視性を「サーバー管理」権限保有者に限定している', () => {
+    const json = pomoCommand.toJSON();
+    expect(json.default_member_permissions).toBe(PermissionFlagsBits.ManageGuild.toString());
+  });
+});
 
 describe('handlePomoStop', () => {
   afterEach(() => {

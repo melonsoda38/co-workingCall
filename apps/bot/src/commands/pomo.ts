@@ -2,6 +2,7 @@ import {
   ChannelType,
   ChatInputCommandInteraction,
   MessageFlags,
+  PermissionFlagsBits,
   SlashCommandBuilder,
 } from 'discord.js';
 import type { Logger } from 'pino';
@@ -35,6 +36,9 @@ function adminRoleRequiredMessage(allowedRoleNames: readonly string[]): string {
 export const pomoCommand = new SlashCommandBuilder()
   .setName('pomo')
   .setDescription('ポモドーロ bot のセットアップ')
+  // /pomo 系は全て管理操作。コマンド一覧の可視性を「サーバー管理」権限保有者に限定する
+  // (実行制御はハンドラ側のロール判定で別途担保する二重防御)。
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
   .addSubcommand((sub) =>
     sub.setName('init').setDescription('このボイスチャンネルでセットアップ/復旧する'),
   )
