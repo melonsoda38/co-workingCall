@@ -112,8 +112,8 @@ describe('buildTimerEmbedMessage', () => {
       },
     ]);
 
-    // description / footer は使わない。
-    expect(json.description).toBeUndefined();
+    // description は title 直下に 1 行分の空白を作るための ZWSP のみ。footer は不使用。
+    expect(json.description).toBe(ZWSP);
     expect(json.footer).toBeUndefined();
     expect(msg.flags).toBe(MessageFlags.SuppressNotifications);
     expect(msg.components ?? []).toHaveLength(0);
