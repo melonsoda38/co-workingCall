@@ -104,10 +104,10 @@ describe('buildTimerEmbedMessage', () => {
       { name: 'セット', value: '2/4', inline: true },
       // 進捗バーは独立行 (name は ZWSP で非表示)。
       { name: ZWSP, value: '▰▰▰▰▰▰▰▰▰▱', inline: false },
-      // 設定サマリ: 進捗バーから 2 行分の空行を挟む。
+      // 設定サマリ: 進捗バーから 1 行分の空行を挟む。
       {
         name: ZWSP,
-        value: `${ZWSP}\n${ZWSP}\n作業25分 / 休憩5分 / 4セット / 最終休憩15分`,
+        value: `${ZWSP}\n作業25分 / 休憩5分 / 4セット / 最終休憩15分`,
         inline: false,
       },
     ]);
@@ -153,11 +153,13 @@ describe('buildTimerEmbedMessage', () => {
     expect(json.fields?.[3]?.inline).toBe(false);
   });
 
-  it('設定サマリ field の値先頭に空行 x2 (ZWSP + 改行) が入る', () => {
+  it('設定サマリ field の値先頭に空行 x1 (ZWSP + 改行) が入る', () => {
     const msg = buildTimerEmbedMessage(snap({ phase: 'work' }), config);
     const json = (msg.embeds?.[0] as EmbedBuilder).toJSON();
     const summaryField = json.fields?.[4];
-    expect(summaryField?.value.startsWith(`${ZWSP}\n${ZWSP}\n`)).toBe(true);
+    expect(summaryField?.value.startsWith(`${ZWSP}\n`)).toBe(true);
+    // 2 連続 ZWSP+改行 は入らない (空行は 1 つだけ)。
+    expect(summaryField?.value.startsWith(`${ZWSP}\n${ZWSP}\n`)).toBe(false);
     expect(summaryField?.value.endsWith('作業25分 / 休憩5分 / 4セット / 最終休憩15分')).toBe(true);
   });
 });
