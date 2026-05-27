@@ -79,7 +79,11 @@ describe('phaseColor', () => {
 });
 
 describe('buildTimerEmbedMessage', () => {
-  it('work: title / color / 3 fields / 進捗バー / footer / SuppressNotifications', () => {
+  // zero-width space: Discord field の name 非表示化 / 空行保持に使う。
+  // ソース上は \u200B エスケープで書く (no-irregular-whitespace 回避)。
+  const ZWSP = '\u200B';
+
+  it('work: title / color / fields 5 段 (残り→フェーズ→セット + bar + 設定サマリ) / フラグ', () => {
     const msg = buildTimerEmbedMessage(
       snap({ phase: 'work', remainingMs: 90_000, currentSet: 2, totalSets: 4 }),
       config,
@@ -91,49 +95,69 @@ describe('buildTimerEmbedMessage', () => {
     expect(json.title).toBe('🍅 ポモドーロタイマー');
     expect(json.color).toBe(0xe74c3c); // work=赤
 
-    // 3 fields: フェーズ / セット / 残り (すべて inline)。
+    // 残り 90s / 総 1500s → 経過率 (1500-90)/1500 = 0.94 → ▰x9 + ▱x1。
+    // フィールド順は「残り → フェーズ → セット」(左から横並び)。
     expect(json.fields).toEqual([
+      // 残りは平文 "MM:SS" (Markdown 見出し ## は Embed field 内では非対応のため使わない)。
+      { name: '残り', value: '01:30', inline: true },
       { name: 'フェーズ', value: '🔥 作業中', inline: true },
       { name: 'セット', value: '2/4', inline: true },
-      { name: '残り', value: '## 01:30', inline: true },
+      // 進捗バーは独立行 (name は ZWSP で非表示)。
+      { name: ZWSP, value: '▰▰▰▰▰▰▰▰▰▱', inline: false },
+      // 設定サマリ: 進捗バーから 2 行分の空行を挟む。
+      {
+        name: ZWSP,
+        value: `${ZWSP}\n${ZWSP}\n作業25分 / 休憩5分 / 4セット / 最終休憩15分`,
+        inline: false,
+      },
     ]);
 
-    // 進捗バーは description に。残り 90s / 総 1500s → 経過率 (1500-90)/1500 = 0.94 → ▰x9 + ▱x1。
-    expect(json.description).toBe('▰▰▰▰▰▰▰▰▰▱');
-
-    expect(json.footer?.text).toBe('作業25分 / 休憩5分 / 4セット / 最終休憩15分');
+    // description / footer は使わない。
+    expect(json.description).toBeUndefined();
+    expect(json.footer).toBeUndefined();
     expect(msg.flags).toBe(MessageFlags.SuppressNotifications);
     expect(msg.components ?? []).toHaveLength(0);
   });
 
-  it('break: 緑カラー + セット番号 N/M', () => {
+  // フィールド順: [0]=残り / [1]=フェーズ / [2]=セット / [3]=進捗バー / [4]=設定サマリ。
+  it('break: 緑カラー + セット番号 N/M + 残りは平文 MM:SS', () => {
     const msg = buildTimerEmbedMessage(
       snap({ phase: 'break', remainingMs: 150_000, currentSet: 3, totalSets: 4 }),
       config,
     );
     const json = (msg.embeds?.[0] as EmbedBuilder).toJSON();
     expect(json.color).toBe(0x2ecc71);
-    expect(json.fields?.[0]?.value).toBe('☕ 休憩中');
-    expect(json.fields?.[1]?.value).toBe('3/4');
-    expect(json.fields?.[2]?.value).toBe('## 02:30');
+    expect(json.fields?.[0]?.value).toBe('02:30');
+    expect(json.fields?.[1]?.value).toBe('☕ 休憩中');
+    expect(json.fields?.[2]?.value).toBe('3/4');
   });
 
-  it('finalBreak: 青カラー + セット欄は「最終」', () => {
+  it('finalBreak: 青カラー + セット欄は「最終」+ 残りは平文 MM:SS', () => {
     const msg = buildTimerEmbedMessage(snap({ phase: 'finalBreak', remainingMs: 300_000 }), config);
     const json = (msg.embeds?.[0] as EmbedBuilder).toJSON();
     expect(json.color).toBe(0x3498db);
-    expect(json.fields?.[0]?.value).toBe('🌙 最終休憩');
-    expect(json.fields?.[1]?.value).toBe('最終');
-    expect(json.fields?.[2]?.value).toBe('## 05:00');
+    expect(json.fields?.[0]?.value).toBe('05:00');
+    expect(json.fields?.[1]?.value).toBe('🌙 最終休憩');
+    expect(json.fields?.[2]?.value).toBe('最終');
   });
 
-  it('countdown: 黄カラー + 残りは ── 固定 + 進捗バー満杯', () => {
+  it('countdown: 黄カラー + 残りは ── 固定 + 進捗バー満杯 (4 つ目 field)', () => {
     const msg = buildTimerEmbedMessage(snap({ phase: 'countdown', remainingMs: 5_000 }), config);
     const json = (msg.embeds?.[0] as EmbedBuilder).toJSON();
     expect(json.color).toBe(0xf1c40f);
-    expect(json.fields?.[0]?.value).toBe('⏰ もうすぐ終了');
-    expect(json.fields?.[1]?.value).toBe('最終');
-    expect(json.fields?.[2]?.value).toBe('## ──');
-    expect(json.description).toBe('▰▰▰▰▰▰▰▰▰▰');
+    expect(json.fields?.[0]?.value).toBe('──');
+    expect(json.fields?.[1]?.value).toBe('⏰ もうすぐ終了');
+    expect(json.fields?.[2]?.value).toBe('最終');
+    // 進捗バーは 4 番目の field (inline: false)。
+    expect(json.fields?.[3]?.value).toBe('▰▰▰▰▰▰▰▰▰▰');
+    expect(json.fields?.[3]?.inline).toBe(false);
+  });
+
+  it('設定サマリ field の値先頭に空行 x2 (ZWSP + 改行) が入る', () => {
+    const msg = buildTimerEmbedMessage(snap({ phase: 'work' }), config);
+    const json = (msg.embeds?.[0] as EmbedBuilder).toJSON();
+    const summaryField = json.fields?.[4];
+    expect(summaryField?.value.startsWith(`${ZWSP}\n${ZWSP}\n`)).toBe(true);
+    expect(summaryField?.value.endsWith('作業25分 / 休憩5分 / 4セット / 最終休憩15分')).toBe(true);
   });
 });

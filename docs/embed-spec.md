@@ -38,17 +38,23 @@ post の API 往復遅延 (数百ms〜2s) を吸収し、表示が "59→54→49
 で 1 つ前の秒 ("00:54") が表示されてしまう。50ms 手前で発火させると
 jitter ∈ [0, 50ms) は境界を越えず "00:55" が安定して表示される。
 
-レイアウト (一目で「今どのフェーズ」「何セット目」「残り時間」が分かる構造):
+レイアウト (一目で「残り時間」「今どのフェーズ」「何セット目」が分かる構造):
 - タイトル: "🍅 ポモドーロタイマー" (固定)
 - 左バー色 (Embed color): フェーズで切替
   - work=赤 (0xE74C3C) / break=緑 (0x2ECC71) / finalBreak=青 (0x3498DB) /
     countdown=黄 (0xF1C40F) / idle・ended=灰 (0x95A5A6)
-- 横並び 3 フィールド (inline: true):
+- 横並び 3 フィールド (inline: true、左から):
+  - 残り: 平文 "MM:SS" (countdown は "──")。
+    Embed field の value は Markdown 見出し (#, ##) が非対応のため使わない。
   - フェーズ: "🔥 作業中" / "☕ 休憩中" / "🌙 最終休憩" / "⏰ もうすぐ終了"
   - セット: "N/M" (work/break) / "最終" (finalBreak/countdown)
-  - 残り: `## MM:SS` (Markdown 見出しで本文より大きく描画。countdown は `## ──`)
-- description: フェーズ内進捗バー (▰▱ 10 分割)
-- footer: 設定サマリ "作業X分 / 休憩Y分 / Mセット / 最終休憩Z分"
+- 進捗バー: inline 行の下に独立 field (inline: false、name は zero-width space で
+  非表示化、value はフェーズ内進捗バー ▰▱ 10 分割)
+- 設定サマリ: 進捗バーから 2 行分の空行を挟む独立 field (inline: false、
+  value 先頭の `<ZWSP>\n<ZWSP>\n` で空行 x2 を作る)。
+  内容は "作業X分 / 休憩Y分 / Mセット / 最終休憩Z分"
+- description / footer は使わない (description は fields より上に描画され、
+  footer は自動セパレータ付きで間隔を制御しにくいため)
 
 ボタン: なし (表示専用。設定アイコンは廃止)
 

@@ -105,15 +105,25 @@ function phaseTotalMs(snapshot: TimerSnapshot, config: BotConfig): number {
   }
 }
 
+/** Discord field の name 非表示化 / 空行保持に使う zero-width space。 */
+const ZWSP = '\u200B';
+
 /**
  * Embed 本文と components (新規投稿・edit 共通の中身)。
  * レイアウト (embed-spec §2):
  * - title: "🍅 ポモドーロタイマー" (固定)
  * - color: フェーズ別 (phaseColor)
- * - fields (inline x 3): フェーズ / セット / 残り
- *   残りは Markdown 見出し ("## MM:SS") で本文より大きく表示
- * - description: フェーズ内進捗バー (▰▱)
- * - footer: config サマリ
+ * - fields:
+ *   1〜3. (inline) 残り / フェーズ / セット (左から横並び)
+ *        残りは平文 "MM:SS"。Embed field の value は Markdown 見出し (#, ##) が
+ *        レンダリングされないため、`## MM:SS` のような記法は使わない。
+ *   4. (block) 進捗バー。inline 行の下に独立行で配置 (name は zero-width space
+ *      で非表示化)。
+ *   5. (block) 設定サマリ。進捗バーから 2 行分の空行を挟む (value 先頭の
+ *      `<ZWSP>\n<ZWSP>\n` で空行 x2 を作る。Discord は通常の空行を trim する
+ *      ため zero-width space を挟んで保持させる)。
+ * - description / footer は使わない (description は fields より上に描画され、
+ *   footer は自動セパレータ付きで間隔を制御しにくいため)。
  */
 export function buildTimerEmbedContent(
   snapshot: TimerSnapshot,
@@ -133,17 +143,21 @@ export function buildTimerEmbedContent(
   const remaining = isCountdown ? '──' : formatRemaining(snapshot.remainingMs);
 
   const fields: APIEmbedField[] = [
+    { name: '残り', value: remaining, inline: true },
     { name: 'フェーズ', value: phaseLabel(snapshot), inline: true },
     { name: 'セット', value: setProgress(snapshot), inline: true },
-    { name: '残り', value: `## ${remaining}`, inline: true },
+    { name: ZWSP, value: progressBar(ratio), inline: false },
+    {
+      name: ZWSP,
+      value: `${ZWSP}\n${ZWSP}\n${formatConfigSummary(config)}`,
+      inline: false,
+    },
   ];
 
   const embed = new EmbedBuilder()
     .setTitle('🍅 ポモドーロタイマー')
     .setColor(phaseColor(snapshot.phase))
-    .addFields(fields)
-    .setDescription(progressBar(ratio))
-    .setFooter({ text: formatConfigSummary(config) });
+    .addFields(fields);
 
   // 作業中タイマー Embed にはボタンを置かない (設定アイコンは廃止)。
   return { embeds: [embed] };
