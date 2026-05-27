@@ -1,10 +1,11 @@
 import {
   EmbedBuilder,
   MessageFlags,
+  type APIEmbedField,
   type BaseMessageOptions,
   type MessageCreateOptions,
 } from 'discord.js';
-import type { BotConfig, TimerSnapshot } from '@co-working-call/shared';
+import type { BotConfig, TimerPhase, TimerSnapshot } from '@co-working-call/shared';
 import { formatConfigSummary } from './start-embed.js';
 
 /** 残りミリ秒を MM:SS に整形する (負値は 00:00)。 */
@@ -22,14 +23,16 @@ export function progressBar(ratio: number, size = 10): string {
   return '▰'.repeat(filled) + '▱'.repeat(size - filled);
 }
 
-/** フェーズ表示テキスト (embed-spec §2)。 */
+/**
+ * フェーズ名表記 (絵文字 + 短い日本語)。
+ * セット番号は別フィールド (setProgress) に分離するためここには含めない。
+ */
 export function phaseLabel(snapshot: TimerSnapshot): string {
-  const { phase, currentSet, totalSets } = snapshot;
-  switch (phase) {
+  switch (snapshot.phase) {
     case 'work':
-      return `🔥 作業中 (${String(currentSet)}/${String(totalSets)})`;
+      return '🔥 作業中';
     case 'break':
-      return `☕ 休憩中 (${String(currentSet)}/${String(totalSets)})`;
+      return '☕ 休憩中';
     case 'finalBreak':
       return '🌙 最終休憩';
     case 'countdown':
@@ -37,6 +40,50 @@ export function phaseLabel(snapshot: TimerSnapshot): string {
     case 'idle':
     case 'ended':
       return '🍅 ポモドーロタイマー';
+  }
+}
+
+/**
+ * セット進捗表記 (Fields の「セット」列用)。
+ * - work / break: "N/M" (現在のセット番号 / 総セット数)
+ * - finalBreak / countdown: 「最終」 (セット概念を超えた最終局面のため)
+ * - idle / ended: "—" (Timer Embed は表示しないが安全のため埋める)
+ */
+export function setProgress(snapshot: TimerSnapshot): string {
+  switch (snapshot.phase) {
+    case 'work':
+    case 'break':
+      return `${String(snapshot.currentSet)}/${String(snapshot.totalSets)}`;
+    case 'finalBreak':
+    case 'countdown':
+      return '最終';
+    case 'idle':
+    case 'ended':
+      return '—';
+  }
+}
+
+/**
+ * フェーズ別 Embed カラー (左の縦バーに反映され、一目でフェーズ判別できる)。
+ * - work: 赤系 (作業=熱量)
+ * - break: 緑系 (休憩=リラックス)
+ * - finalBreak: 青系 (最終休憩=落ち着き)
+ * - countdown: 黄系 (終了予告=注意喚起)
+ * - idle / ended: 灰系
+ */
+export function phaseColor(phase: TimerPhase): number {
+  switch (phase) {
+    case 'work':
+      return 0xe74c3c;
+    case 'break':
+      return 0x2ecc71;
+    case 'finalBreak':
+      return 0x3498db;
+    case 'countdown':
+      return 0xf1c40f;
+    case 'idle':
+    case 'ended':
+      return 0x95a5a6;
   }
 }
 
@@ -58,7 +105,16 @@ function phaseTotalMs(snapshot: TimerSnapshot, config: BotConfig): number {
   }
 }
 
-/** Embed 本文と components (新規投稿・edit 共通の中身)。 */
+/**
+ * Embed 本文と components (新規投稿・edit 共通の中身)。
+ * レイアウト (embed-spec §2):
+ * - title: "🍅 ポモドーロタイマー" (固定)
+ * - color: フェーズ別 (phaseColor)
+ * - fields (inline x 3): フェーズ / セット / 残り
+ *   残りは Markdown 見出し ("## MM:SS") で本文より大きく表示
+ * - description: フェーズ内進捗バー (▰▱)
+ * - footer: config サマリ
+ */
 export function buildTimerEmbedContent(
   snapshot: TimerSnapshot,
   config: BotConfig,
@@ -76,9 +132,17 @@ export function buildTimerEmbedContent(
   }
   const remaining = isCountdown ? '──' : formatRemaining(snapshot.remainingMs);
 
+  const fields: APIEmbedField[] = [
+    { name: 'フェーズ', value: phaseLabel(snapshot), inline: true },
+    { name: 'セット', value: setProgress(snapshot), inline: true },
+    { name: '残り', value: `## ${remaining}`, inline: true },
+  ];
+
   const embed = new EmbedBuilder()
     .setTitle('🍅 ポモドーロタイマー')
-    .setDescription(`${phaseLabel(snapshot)}\n残り ${remaining}\n${progressBar(ratio)}`)
+    .setColor(phaseColor(snapshot.phase))
+    .addFields(fields)
+    .setDescription(progressBar(ratio))
     .setFooter({ text: formatConfigSummary(config) });
 
   // 作業中タイマー Embed にはボタンを置かない (設定アイコンは廃止)。
