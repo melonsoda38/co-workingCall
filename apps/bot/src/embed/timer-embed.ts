@@ -113,6 +113,8 @@ const ZWSP = '\u200B';
  * レイアウト (embed-spec §2):
  * - title: "🍅 ポモドーロタイマー" (固定)
  * - color: フェーズ別 (phaseColor)
+ * - description: zero-width space 1 文字。タイトル直下と fields 開始位置の
+ *   間に 1 行分の空白を作るためだけに使う (実コンテンツは fields 側に置く)。
  * - fields:
  *   1〜3. (inline) 残り / フェーズ / セット (左から横並び)
  *        残りは平文 "MM:SS"。Embed field の value は Markdown 見出し (#, ##) が
@@ -122,8 +124,7 @@ const ZWSP = '\u200B';
  *   5. (block) 設定サマリ。進捗バーから 1 行分の空行を挟む (value 先頭の
  *      `<ZWSP>\n` で空行 x1 を作る。Discord は通常の空行を trim するため
  *      zero-width space を挟んで保持させる)。
- * - description / footer は使わない (description は fields より上に描画され、
- *   footer は自動セパレータ付きで間隔を制御しにくいため)。
+ * - footer は使わない (自動セパレータ付きで間隔を制御しにくいため)。
  */
 export function buildTimerEmbedContent(
   snapshot: TimerSnapshot,
@@ -157,6 +158,8 @@ export function buildTimerEmbedContent(
   const embed = new EmbedBuilder()
     .setTitle('🍅 ポモドーロタイマー')
     .setColor(phaseColor(snapshot.phase))
+    // description は title と最初の field の間に 1 行分の空白を作るためだけに使う。
+    .setDescription(ZWSP)
     .addFields(fields);
 
   // 作業中タイマー Embed にはボタンを置かない (設定アイコンは廃止)。
