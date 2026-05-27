@@ -119,9 +119,9 @@ const ZWSP = '\u200B';
  *        レンダリングされないため、`## MM:SS` のような記法は使わない。
  *   4. (block) 進捗バー。inline 行の下に独立行で配置 (name は zero-width space
  *      で非表示化)。
- *   5. (block) 設定サマリ。進捗バーから 2 行分の空行を挟む (value 先頭の
- *      `<ZWSP>\n<ZWSP>\n` で空行 x2 を作る。Discord は通常の空行を trim する
- *      ため zero-width space を挟んで保持させる)。
+ *   5. (block) 設定サマリ。進捗バーから 1 行分の空行を挟む (value 先頭の
+ *      `<ZWSP>\n` で空行 x1 を作る。Discord は通常の空行を trim するため
+ *      zero-width space を挟んで保持させる)。
  * - description / footer は使わない (description は fields より上に描画され、
  *   footer は自動セパレータ付きで間隔を制御しにくいため)。
  */
@@ -149,7 +149,7 @@ export function buildTimerEmbedContent(
     { name: ZWSP, value: progressBar(ratio), inline: false },
     {
       name: ZWSP,
-      value: `${ZWSP}\n${ZWSP}\n${formatConfigSummary(config)}`,
+      value: `${ZWSP}\n${formatConfigSummary(config)}`,
       inline: false,
     },
   ];
