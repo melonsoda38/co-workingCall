@@ -11,12 +11,14 @@ import { buildTimerEmbedContent } from './timer-embed.js';
 export const TIMER_EMBED_UPDATE_INTERVAL_MS = 60_000;
 
 /**
- * 分境界より手前で発火させる安全マージン (ms)。
+ * 分境界を「過ぎてから」発火させる安全マージン (ms)。
  *
- * setTimeout は OS タイマー精度 + Node.js イベントループ要因で常に正の方向に
- * ジッタを持つ (1〜数十 ms)。境界ちょうど (remaining = 24分=1,440,000ms) を狙うと、
- * 実際の発火時刻には remaining = 1,439,9xx ms になり ceil(残り/60000) が 1 分多く
- * 表示されるなど境界がズレる。手前で発火させて境界の内側で確実に更新する。
+ * 表示は ceil(残り/60000) なので、残りが分境界 (60,000 の倍数) を *下回った瞬間* に
+ * 1 減る。境界の手前で撃つと ceil がまだ減っておらず「1 分多い」旧値を描いてしまい、
+ * 表示が実時間より常に約 1 分遅れる (例: 残り 30 秒でも「2分」のまま → 終了直前に
+ * やっと「1分」が一瞬出て切り替わって見えない)。よって境界の *内側* (margin だけ
+ * 過ぎた位置) で撃ち、確実に減算後の値を表示する。setTimeout の正方向ジッタ
+ * (数十 ms) があっても境界を越えた側に留まれるよう margin を確保する。
  */
 export const TIMER_EMBED_UPDATE_SAFETY_MARGIN_MS = 50;
 
@@ -29,15 +31,11 @@ export function computeNextDelay(
   interval: number = TIMER_EMBED_UPDATE_INTERVAL_MS,
   margin: number = TIMER_EMBED_UPDATE_SAFETY_MARGIN_MS,
 ): number {
-  // 「次の interval 境界 (分境界) までの ms」を 1..interval に正規化。
+  // 「次の分境界 (interval の倍数) までの ms」を 1..interval に正規化。
   // 例(interval=60,000): remaining=1,500,000 → 60,000, remaining=1,499,200 → 59,200。
   const toBoundary = ((remainingMs - 1) % interval) + 1;
-  const delay = toBoundary - margin;
-  // 0 以下 = 境界に到達済み or 過ぎた直後。1 つ先の境界手前に飛ばす。
-  if (delay <= 0) {
-    return delay + interval;
-  }
-  return delay;
+  // 境界を margin だけ過ぎてから発火 → ceil(残り/interval) が 1 減った値を確実に描く。
+  return toBoundary + margin;
 }
 
 /** edit 可能なメッセージの最小インターフェース (実 Discord Message を US-10 で注入)。 */
@@ -76,15 +74,15 @@ export class TimerEmbedUpdater {
   }
 
   /**
-   * 「次の分境界の少し手前 (SAFETY_MARGIN_MS だけ前)」まで setTimeout で待ってから
+   * 「次の分境界を少し過ぎた所 (SAFETY_MARGIN_MS だけ後)」まで setTimeout で待ってから
    * update を発火し、同様のロジックで次回も再スケジュールする自己補正チェイン。
    *
    * setInterval を使わない理由: setInterval は再アームごとに微小ドリフトが蓄積し、
    * 長時間セッションでは累計でズレ得る。自己補正 setTimeout なら毎回 getSnapshot()
    * で現在値を読み再計算するため、長時間でも分境界に居続ける。
    *
-   * 待ち時間計算は computeNextDelay 参照 (分境界の手前で発火させ、残り分表示の
-   * 切り替わりタイミングに合わせる)。
+   * 待ち時間計算は computeNextDelay 参照 (分境界を過ぎてから発火させ、ceil の
+   * 残り分表示が減算後の値に切り替わるタイミングに合わせる)。
    */
   start(): void {
     this.stop();
