@@ -45,7 +45,11 @@ function makeInteraction(opts: { memberVcId: string | null; messageId?: string }
   return { interaction, reply, deferUpdate, fetch };
 }
 
-function makeSession(opts?: { phase?: TimerSnapshot['phase']; connected?: boolean }): {
+function makeSession(opts?: {
+  phase?: TimerSnapshot['phase'];
+  connected?: boolean;
+  isEnding?: boolean;
+}): {
   session: VoiceSession;
   start: ReturnType<typeof vi.fn>;
   ensureConnected: ReturnType<typeof vi.fn>;
@@ -67,7 +71,7 @@ function makeSession(opts?: { phase?: TimerSnapshot['phase']; connected?: boolea
   const session = {
     config,
     timer: { getSnapshot, start },
-    embedManager: { applyConfig, adoptStartEmbed },
+    embedManager: { applyConfig, adoptStartEmbed, isEnding: opts?.isEnding ?? false },
     voiceManager: { ensureConnected },
   } as unknown as VoiceSession;
   return { session, start, ensureConnected, applyConfig, adoptStartEmbed };
@@ -117,6 +121,15 @@ describe('handleStartButton', () => {
   it('すでにタイマー動作中なら ephemeral 応答し再開始しない', async () => {
     const { interaction, reply } = makeInteraction({ memberVcId: TARGET_VC });
     const { session, start } = makeSession({ phase: 'work' });
+    await handleStartButton(interaction, session, 'cfg.json', logger);
+    expect(reply).toHaveBeenCalledTimes(1);
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('終了演出フロー進行中 (isEnding) は phase=idle でも ephemeral 応答し開始しない', async () => {
+    const { interaction, reply } = makeInteraction({ memberVcId: TARGET_VC });
+    // 空VC経由の終了演出は timer.stop 済みで phase='idle' になるが isEnding=true。
+    const { session, start } = makeSession({ phase: 'idle', isEnding: true });
     await handleStartButton(interaction, session, 'cfg.json', logger);
     expect(reply).toHaveBeenCalledTimes(1);
     expect(start).not.toHaveBeenCalled();

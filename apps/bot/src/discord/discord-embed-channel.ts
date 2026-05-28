@@ -1,7 +1,7 @@
 import type { BaseMessageOptions, MessageCreateOptions, VoiceChannel } from 'discord.js';
 import type { Logger } from 'pino';
 import type { EmbedChannel, PostedMessage } from '../embed/index.js';
-import { purgeOwnEmbeds } from './purge-embeds.js';
+import { purgeOwnEmbeds, purgeOwnTexts } from './purge-embeds.js';
 
 /**
  * 実 Discord VoiceChannel を EmbedManager の EmbedChannel として扱うアダプタ。
@@ -28,6 +28,9 @@ export function createDiscordEmbedChannel(channel: VoiceChannel, logger: Logger)
     },
     async purgeOwnEmbeds(): Promise<void> {
       await purgeOwnEmbeds(channel, channel.client.user.id, logger);
+    },
+    async purgeOwnTexts(contents: string[]): Promise<void> {
+      await purgeOwnTexts(channel, channel.client.user.id, contents, logger);
     },
   };
 }

@@ -122,6 +122,13 @@
   ├ No  → ephemeral "VCに参加してから押してください" → 終了
   └ Yes → 次へ
 
+[二重起動チェック]
+  ├ timer.phase !== 'idle' または 終了演出進行中 (embedManager.isEnding)
+  │    → ephemeral "すでにタイマーが動作中です" → 終了
+  └ それ以外 → 次へ
+  ※ 自然 ended は演出中 phase='ended'、空VC経由は timer.stop 済みで 'idle' になるため、
+    phase だけでなく isEnding も見て一貫して弾く。
+
 [bot自身がVCにいるかチェック]
   ├ No  → bot入室 → 次へ
   └ Yes → 次へ

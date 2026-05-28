@@ -72,8 +72,12 @@ function fakeChannel() {
     calls.push('purge');
     return Promise.resolve();
   });
-  const channel: EmbedChannel = { post, edit, delete: del, purgeOwnEmbeds };
-  return { channel, post, edit, del, purgeOwnEmbeds, calls };
+  const purgeOwnTexts = vi.fn<(contents: string[]) => Promise<void>>(() => {
+    calls.push('purgeTexts');
+    return Promise.resolve();
+  });
+  const channel: EmbedChannel = { post, edit, delete: del, purgeOwnEmbeds, purgeOwnTexts };
+  return { channel, post, edit, del, purgeOwnEmbeds, purgeOwnTexts, calls };
 }
 
 function fakeSound() {
@@ -760,5 +764,75 @@ describe('EmbedManager.repostStartEmbed (設定モーダル結線)', () => {
     expect(post).not.toHaveBeenCalled();
     expect(del).not.toHaveBeenCalled();
     expect(m.startEmbedId).toBeNull();
+  });
+});
+
+describe('EmbedManager 孤児テキスト掃除 / isEnding (監査観察事項1-3)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('isEnding は初期 false、onTimerStart で歓迎/お疲れさまの本文掃除を呼ぶ', async () => {
+    const { channel, purgeOwnTexts } = fakeChannel();
+    const timer = new FakeTimer();
+    const m = new EmbedManager({ channel, timer, config, logger });
+    expect(m.isEnding).toBe(false);
+
+    timer.emit('phaseChange', makeSnapshot('work')); // 初回 → onTimerStart
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(purgeOwnTexts).toHaveBeenCalledTimes(1);
+    const contents = purgeOwnTexts.mock.calls[0]?.[0] ?? [];
+    expect(contents).toContain('お疲れさまでした 👋');
+    expect(contents.some((c) => c.includes('ご参加ありがとうございます'))).toBe(true);
+  });
+
+  it('onIdle でも歓迎/お疲れさまの本文掃除を呼ぶ (孤児回収)', async () => {
+    const { channel, purgeOwnTexts } = fakeChannel();
+    const m = new EmbedManager({ channel, timer: new FakeTimer(), config, logger });
+    await m.onIdle();
+    expect(purgeOwnTexts).toHaveBeenCalledTimes(1);
+  });
+
+  it('purgeOrphanTexts は歓迎/お疲れさまの本文掃除を呼ぶ (起動時クリーンアップ用)', async () => {
+    const { channel, purgeOwnTexts } = fakeChannel();
+    const m = new EmbedManager({ channel, timer: new FakeTimer(), config, logger });
+    await m.purgeOrphanTexts();
+    expect(purgeOwnTexts).toHaveBeenCalledTimes(1);
+    const contents = purgeOwnTexts.mock.calls[0]?.[0] ?? [];
+    expect(contents).toContain('お疲れさまでした 👋');
+  });
+
+  it('ended で予約したお疲れさま30秒削除は、30秒前に新セッションが始まると発火しない', async () => {
+    const { channel, del } = fakeChannel();
+    const timer = new FakeTimer();
+    // 構築でタイマーイベントを購読する (副作用)。変数参照は不要。
+    new EmbedManager({
+      channel,
+      timer,
+      config,
+      logger,
+      endingDelay: () => Promise.resolve(),
+    });
+    // 1 セッション目: work → ended。お疲れさま (m3) の30秒削除を予約。
+    timer.emit('phaseChange', makeSnapshot('work'));
+    await vi.advanceTimersByTimeAsync(0);
+    timer.emit('ended', makeSnapshot('ended'));
+    await vi.advanceTimersByTimeAsync(0);
+
+    // 30秒経過前 (10秒後) に新セッション開始 → onTimerStart が予約をキャンセル。
+    timer.snapshot = makeSnapshot('idle');
+    await vi.advanceTimersByTimeAsync(10_000);
+    timer.emit('phaseChange', makeSnapshot('work'));
+    await vi.advanceTimersByTimeAsync(0);
+
+    // 新セッション開始直後の delete 数を基準に、さらに 60 秒進めても増えないこと
+    // = 予約済みの「お疲れさま30秒削除」タイマーがキャンセルされ発火していないこと。
+    const delsAfterRestart = del.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(del.mock.calls.length).toBe(delsAfterRestart);
   });
 });
