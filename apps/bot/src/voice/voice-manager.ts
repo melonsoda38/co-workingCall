@@ -171,6 +171,13 @@ export class VoiceManager {
 
   #onLeave(): void {
     this.#cancelEmptyTimeout();
+    if (this.#connection === null) {
+      // bot が VC 未接続 (終了演出で退出済み等) なら退出カウントダウンは不要。
+      // 終了演出の kickAllHumans が誘発する遅延 voiceStateUpdate (人間ゼロ) で、
+      // forceDisconnect 済みなのに 30 秒タイマーが起動し、後から onIdle / 終了演出を
+      // 再発火させる取りこぼしを防ぐ。
+      return;
+    }
     this.#logger.info(
       { timeoutMs: this.#emptyVcTimeoutMs },
       '人間ゼロを検知。退出カウントダウンを開始 (この間に再入室があればキャンセル)',

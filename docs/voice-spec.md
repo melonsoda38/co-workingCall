@@ -110,6 +110,12 @@ ended処理:
 ended処理の途中でbotがVC接続を切ることで、その後の voiceStateUpdate
 イベントによる重複処理を防ぐ。
 
+ただし kick が誘発する voiceStateUpdate (人間ゼロ) は、step 7 の
+emptyVcTimeoutTimer キャンセルより**後**に届くことがある (イベント順序依存)。
+この取りこぼしに備え、人間ゼロ→退出カウントダウン開始ロジックは
+「bot が VC 未接続 (connection=null) なら開始しない」ガードを持つ。これにより
+退出済みなのに 30秒後に onIdle / 終了演出が再発火するのを防ぐ。
+
 ## VoiceConnection の管理
 
 ### 接続時

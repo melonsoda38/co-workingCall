@@ -138,6 +138,10 @@ bot メッセージは触らない)。fetch 上限 100 件、削除は best-effo
 ### 実行中の重複防止
 - isReposting フラグで再エントリ防止
 - 実行中に来たトリガーは再エントリ後の次サイクルで処理
+- フェーズガード: 再投稿実行 (#repostTimerEmbed) は実行直前に現在フェーズを確認し、
+  work/break/finalBreak 以外 (countdown/ended/idle) では no-op にする。デバウンス
+  発火 (flush) は cancel() では止められない (in-flight) ため、フェーズ遷移と競合して
+  も countdown/ended 後に誤った Embed や孤児 Embed を投稿しないようにする保険。
 
 ### タイマークリアタイミング
 - フェーズ切替 (work↔break, work→finalBreak)
