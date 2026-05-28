@@ -17,7 +17,7 @@ const config: BotConfig = {
   adminRoleNames: [],
 };
 
-function makeSnapshot(phase: TimerSnapshot['phase'], remainingMs = 1_000): TimerSnapshot {
+function makeSnapshot(phase: TimerSnapshot['phase'], remainingMs = 60_000): TimerSnapshot {
   return { phase, remainingMs, currentSet: 1, totalSets: 4, startedAt: 0 };
 }
 
@@ -43,25 +43,30 @@ function makeDecreasingSource(
   };
 }
 
-describe('computeNextDelay (5の倍数秒境界吸着 + 安全マージン)', () => {
-  it('境界より大きく離れた残り: 境界手前まで待つ (margin=50ms 差し引き)', () => {
-    // remaining=59,200 → 次の境界 55,000 までは 4,200ms、その 50ms 手前 = 4,150ms。
-    expect(computeNextDelay(59_200)).toBe(4_150);
+describe('computeNextDelay (分境界吸着 + 安全マージン)', () => {
+  it('既定 interval=60,000ms / margin=50ms', () => {
+    expect(TIMER_EMBED_UPDATE_INTERVAL_MS).toBe(60_000);
+    expect(TIMER_EMBED_UPDATE_SAFETY_MARGIN_MS).toBe(50);
+  });
+
+  it('境界より大きく離れた残り: 境界手前まで待つ (margin 差し引き)', () => {
+    // remaining=1,499,200 → 次の分境界 1,440,000 までは 59,200ms、その 50ms 手前。
+    expect(computeNextDelay(1_499_200)).toBe(59_150);
   });
 
   it('境界ちょうどの残り: 即時 update は冗長なので 1 つ先の境界手前まで待つ', () => {
-    // remaining=55,000 → ((54,999%5000)+1)=5,000, 50 引いて 4,950ms 後 (次の "00:50" 手前)。
-    expect(computeNextDelay(55_000)).toBe(4_950);
+    // remaining=1,500,000 (25 分ちょうど) → ((1,499,999%60,000)+1)=60,000, 50 引いて 59,950ms。
+    expect(computeNextDelay(1_500_000)).toBe(59_950);
   });
 
   it('境界をジッタで僅かに越えた残り: マイナス値を 1 つ先の境界に飛ばす', () => {
-    // remaining=55,030 → ((55,029%5000)+1)=30, 30-50=-20 → -20+5000=4,980ms 後。
-    expect(computeNextDelay(55_030)).toBe(4_980);
+    // remaining=1,440,030 (境界 1,440,000 を 30ms 過ぎた) → toBoundary=30, 30-50=-20 → +60,000=59,980。
+    expect(computeNextDelay(1_440_030)).toBe(59_980);
   });
 
-  it('残り 1ms: 最小 delay (= INTERVAL - margin + 1) で次の境界手前へ', () => {
-    // remaining=1 → ((0%5000)+1)=1, 1-50=-49 → -49+5000=4,951ms 後。
-    expect(computeNextDelay(1)).toBe(4_951);
+  it('残り 1ms: 最小 toBoundary を 1 つ先の境界手前へ', () => {
+    // remaining=1 → ((0%60,000)+1)=1, 1-50=-49 → +60,000=59,951。
+    expect(computeNextDelay(1)).toBe(59_951);
   });
 
   it('interval / margin 引数を差し替えられる (テスト容易性)', () => {
@@ -77,72 +82,24 @@ describe('TimerEmbedUpdater', () => {
     vi.useRealTimers();
   });
 
-  it('境界吸着 + 自己補正で 5秒ごとに edit する (動的 source)', () => {
+  it('分境界吸着 + 自己補正で 60 秒ごとに edit する (動的 source)', () => {
     const edit = vi.fn(() => Promise.resolve());
     const message: EditableMessage = { edit };
-    // 残り 59,200ms から開始: 初回 4,150ms 後 → 以降 5,000ms ごとに発火。
-    const source = makeDecreasingSource(59_200);
+    // 残り 25 分ちょうどから開始: 初回 59,950ms 後 → 以降 60,000ms ごとに発火。
+    const source = makeDecreasingSource(1_500_000);
     const updater = new TimerEmbedUpdater(message, source, config);
 
     updater.start();
-    // 初回 (4,150ms 後)。
-    vi.advanceTimersByTime(4_149);
+    vi.advanceTimersByTime(59_949);
     expect(edit).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
     expect(edit).toHaveBeenCalledTimes(1);
-    // 2 回目 (累計 9,150ms)。
-    vi.advanceTimersByTime(4_999);
+    // 2 回目は 60,000ms 後。
+    vi.advanceTimersByTime(59_999);
     expect(edit).toHaveBeenCalledTimes(1);
     vi.advanceTimersByTime(1);
     expect(edit).toHaveBeenCalledTimes(2);
-    // 3 回目 (累計 14,150ms)。
-    vi.advanceTimersByTime(TIMER_EMBED_UPDATE_INTERVAL_MS);
-    expect(edit).toHaveBeenCalledTimes(3);
     updater.stop();
-  });
-
-  it('境界一致の動的 source: 初回は 4,950ms 後 → 以降 5,000ms ごと', () => {
-    const edit = vi.fn(() => Promise.resolve());
-    const source = makeDecreasingSource(55_000);
-    const updater = new TimerEmbedUpdater({ edit }, source, config);
-
-    updater.start();
-    vi.advanceTimersByTime(4_949);
-    expect(edit).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(1);
-    expect(edit).toHaveBeenCalledTimes(1);
-    vi.advanceTimersByTime(TIMER_EMBED_UPDATE_INTERVAL_MS);
-    expect(edit).toHaveBeenCalledTimes(2);
-    updater.stop();
-  });
-
-  it('発火時に表示される残り秒は常に 5 の倍数 (Math.floor 切り捨て耐性)', () => {
-    const captured: number[] = [];
-    const source = makeDecreasingSource(59_200);
-    const updater = new TimerEmbedUpdater(
-      {
-        edit: () => {
-          // edit 呼出時点で source.getSnapshot() の秒値を記録する。
-          captured.push(Math.floor(source.getSnapshot().remainingMs / 1000));
-          return Promise.resolve();
-        },
-      },
-      source,
-      config,
-    );
-
-    updater.start();
-    // 6 回ぶん進める (4,150 + 5,000 * 5 = 29,150ms)。
-    vi.advanceTimersByTime(4_150 + TIMER_EMBED_UPDATE_INTERVAL_MS * 5);
-    updater.stop();
-
-    expect(captured.length).toBe(6);
-    // 全て秒値の 1 の位が 0 or 5 (= 5 の倍数)。
-    for (const sec of captured) {
-      expect(sec % 5).toBe(0);
-    }
-    // 連続する 6 回は 5 ずつ減る (55, 50, 45, 40, 35, 30 のような並び)。
-    expect(captured).toEqual([55, 50, 45, 40, 35, 30]);
   });
 
   it('countdown / ended はスキップする', () => {
@@ -165,7 +122,7 @@ describe('TimerEmbedUpdater', () => {
 
   it('stop 後は edit されない (境界待ち中の setTimeout も解除される)', () => {
     const edit = vi.fn(() => Promise.resolve());
-    const updater = new TimerEmbedUpdater({ edit }, makeDecreasingSource(60_000), config);
+    const updater = new TimerEmbedUpdater({ edit }, makeDecreasingSource(1_500_000), config);
 
     updater.start();
     // 境界吸着の setTimeout 中 (まだ未発火) で stop する。
@@ -173,9 +130,5 @@ describe('TimerEmbedUpdater', () => {
     updater.stop();
     vi.advanceTimersByTime(TIMER_EMBED_UPDATE_INTERVAL_MS * 3);
     expect(edit).not.toHaveBeenCalled();
-  });
-
-  it('SAFETY_MARGIN_MS は 50ms (jitter 吸収のための定数を export)', () => {
-    expect(TIMER_EMBED_UPDATE_SAFETY_MARGIN_MS).toBe(50);
   });
 });
