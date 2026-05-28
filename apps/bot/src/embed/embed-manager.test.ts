@@ -223,6 +223,26 @@ describe('EmbedManager', () => {
     expect(post.mock.calls.length).toBe(before + 1);
   });
 
+  it('デバウンス発火時に countdown へ遷移済みなら timer Embed を貼り直さない (in-flight flush ガード)', async () => {
+    const { channel, post } = fakeChannel();
+    const timer = new FakeTimer();
+    const m = new EmbedManager({ channel, timer, config, logger });
+    timer.emit('phaseChange', makeSnapshot('work'));
+    await vi.advanceTimersByTimeAsync(0);
+    const before = post.mock.calls.length;
+
+    // work 中に検知してデバウンス開始 (60s 後に flush 予定)。
+    m.onHumanMessage();
+    // flush 前にフェーズが countdown へ進む。onCountdownEnter の cancel() は
+    // in-flight な flush を止められないため、flush が countdown 中に走る状況を
+    // snapshot 差し替えで再現する (cancel は呼ばない)。
+    timer.snapshot = makeSnapshot('countdown');
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    // 表示フェーズ外なので貼り直しは抑止され post は増えない (孤児 Embed を作らない)。
+    expect(post.mock.calls.length).toBe(before);
+  });
+
   it('countdown で edit、ended で削除→お疲れさま投稿→4秒待機→新スタート投稿', async () => {
     const { channel, edit, del } = fakeChannel();
     const timer = new FakeTimer();

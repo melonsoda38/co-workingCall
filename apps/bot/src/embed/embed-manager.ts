@@ -363,6 +363,15 @@ export class EmbedManager {
   }
 
   async #repostTimerEmbed(): Promise<void> {
+    // 表示フェーズ (work/break/finalBreak) 以外では貼り直さない。
+    // デバウンス flush は cancel() で止められない (in-flight)。countdown/ended/idle へ
+    // 遷移した後にデバウンス再投稿が走ると、ended の「-」表示 Embed を孤児として
+    // post したり、purgeOwnEmbeds がスタート Embed を巻き込む等の不整合を生む。
+    // 実フェーズを確認し、表示フェーズ外なら no-op にして遷移ハンドラ側の Embed を尊重する。
+    const { phase } = this.#timer.getSnapshot();
+    if (phase !== 'work' && phase !== 'break' && phase !== 'finalBreak') {
+      return;
+    }
     await this.#deleteTimerEmbed();
     const snapshot = this.#timer.getSnapshot();
     const posted = await this.#postFresh(buildTimerEmbedMessage(snapshot, this.#config));

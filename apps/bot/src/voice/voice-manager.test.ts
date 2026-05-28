@@ -161,6 +161,26 @@ describe('VoiceManager', () => {
     expect(vm.connected).toBe(true);
   });
 
+  it('終了演出で切断済み (未接続) なら遅延 voiceStateUpdate の人間ゼロでも退出CDを開始しない', async () => {
+    // 終了演出の kickAllHumans → bot 退出 (forceDisconnect) 後に、kick が誘発した
+    // voiceStateUpdate (人間ゼロ) が遅れて届くケース。未接続なので退出CDは不要。
+    const { vm, triggerEndingFlow, resetToIdle } = setup({
+      phase: 'work',
+      withTriggerEndingFlow: true,
+    });
+    await vm.handleHumanCountChange(1); // 接続 (#connection 設定)
+    expect(vm.connected).toBe(true);
+    vm.forceDisconnect(); // 終了演出の bot 退出相当 (#connection=null)
+    expect(vm.connected).toBe(false);
+
+    await vm.handleHumanCountChange(0); // kick による遅延 voiceStateUpdate (1→0)
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    // 退出CDが起動していない = 終了演出・暗定復帰の再発火なし。
+    expect(triggerEndingFlow).not.toHaveBeenCalled();
+    expect(resetToIdle).not.toHaveBeenCalled();
+  });
+
   it('US-20: タイマー実行中 + triggerEndingFlow 注入時は終了演出フローを発動し、暗定復帰経路は使わない', async () => {
     const { vm, timer, destroy, resetToIdle, triggerEndingFlow } = setup({
       phase: 'work',
