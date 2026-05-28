@@ -18,7 +18,10 @@ export function createDiscordEmbedChannel(channel: VoiceChannel, logger: Logger)
     },
     async edit(messageId: string, options: BaseMessageOptions): Promise<void> {
       const message = await channel.messages.fetch(messageId);
-      await message.edit(options);
+      // attachments: [] で既存添付を全て破棄してから options.files を貼り直す。
+      // これを省くと discord.js は同名 attachment を積み増すだけで Embed の
+      // attachment://timer.png が初回投稿の画像に固定され、画像が更新されない。
+      await message.edit({ ...options, attachments: [] });
     },
     async delete(messageId: string): Promise<void> {
       await channel.messages.delete(messageId);
