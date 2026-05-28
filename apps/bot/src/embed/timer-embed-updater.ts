@@ -2,18 +2,21 @@ import type { BaseMessageOptions } from 'discord.js';
 import type { BotConfig, TimerSnapshot } from '@co-working-call/shared';
 import { buildTimerEmbedContent } from './timer-embed.js';
 
-export const TIMER_EMBED_UPDATE_INTERVAL_MS = 5_000;
+/**
+ * タイマー画像の更新間隔 (ms)。分刻み表示なので 60 秒。
+ *
+ * タイマー Embed は円形画像 (中央に残り分) で、表示が分単位でしか変わらない。
+ * よって 5 秒ごとの更新は無駄 (帯域・CPU・画像再 fetch) なので分境界に合わせる。
+ */
+export const TIMER_EMBED_UPDATE_INTERVAL_MS = 60_000;
 
 /**
- * 5 の倍数秒境界より手前で発火させる安全マージン (ms)。
+ * 分境界より手前で発火させる安全マージン (ms)。
  *
  * setTimeout は OS タイマー精度 + Node.js イベントループ要因で常に正の方向に
- * ジッタを持つ (1〜数十 ms)。境界ちょうど (remaining = 55,000ms) を狙うと、
- * 実際の発火時刻には remaining = 54,9xx ms になっており Math.floor(54999/1000)=54
- * で 1 つ前の秒 ("00:54") が表示されてしまう。
- *
- * 50ms 手前で発火させると jitter ∈ [0, 50ms) の範囲は remaining ∈ [55,000, 55,050)
- * に収まり、Math.floor = 55 → "00:55" が安定して表示される。
+ * ジッタを持つ (1〜数十 ms)。境界ちょうど (remaining = 24分=1,440,000ms) を狙うと、
+ * 実際の発火時刻には remaining = 1,439,9xx ms になり ceil(残り/60000) が 1 分多く
+ * 表示されるなど境界がズレる。手前で発火させて境界の内側で確実に更新する。
  */
 export const TIMER_EMBED_UPDATE_SAFETY_MARGIN_MS = 50;
 
@@ -26,12 +29,11 @@ export function computeNextDelay(
   interval: number = TIMER_EMBED_UPDATE_INTERVAL_MS,
   margin: number = TIMER_EMBED_UPDATE_SAFETY_MARGIN_MS,
 ): number {
-  // 「次の 5 の倍数秒境界までの ms」を 1..interval に正規化。
-  // 例: remaining=59,200 → 4,200, remaining=55,000 → 5,000, remaining=55,001 → 1。
+  // 「次の interval 境界 (分境界) までの ms」を 1..interval に正規化。
+  // 例(interval=60,000): remaining=1,500,000 → 60,000, remaining=1,499,200 → 59,200。
   const toBoundary = ((remainingMs - 1) % interval) + 1;
   const delay = toBoundary - margin;
   // 0 以下 = 境界に到達済み or 過ぎた直後。1 つ先の境界手前に飛ばす。
-  // 例: remaining=55,030 (境界 55,000 を 30ms 過ぎた) → toBoundary=30, delay=-20 → +5000=4980
   if (delay <= 0) {
     return delay + interval;
   }
@@ -49,10 +51,10 @@ export interface SnapshotSource {
 }
 
 /**
- * タイマー用 Embed を 5秒ごとに edit 更新するドライバ (embed-spec §各フェーズ)。
+ * タイマー用 Embed (円形画像) を分刻みで edit 更新するドライバ (embed-spec §各フェーズ)。
  * work/break/finalBreak のみ更新し、countdown/ended/idle はスキップする
- * (countdown 突入後の 5秒更新停止 = ending-spec)。
- * 実 Discord Message / PomodoroTimer との配線は US-10 EmbedManager で行う。
+ * (countdown 突入後の定期更新停止 = ending-spec)。
+ * 実 Discord Message / PomodoroTimer との配線は EmbedManager で行う。
  */
 export class TimerEmbedUpdater {
   readonly #message: EditableMessage;
@@ -74,21 +76,15 @@ export class TimerEmbedUpdater {
   }
 
   /**
-   * 「次の 5 の倍数秒境界の少し手前 (= 残り秒の 1 の位が 0 / 5 になる瞬間より
-   * SAFETY_MARGIN_MS だけ前)」まで setTimeout で待ってから update を発火し、
-   * 同様のロジックで次回も再スケジュールする自己補正チェイン。
+   * 「次の分境界の少し手前 (SAFETY_MARGIN_MS だけ前)」まで setTimeout で待ってから
+   * update を発火し、同様のロジックで次回も再スケジュールする自己補正チェイン。
    *
-   * setInterval を使わない理由: setInterval は再アームごとに微小ドリフトが
-   * 蓄積し、25 分セッションでは累計数百ms ズレ得る。自己補正 setTimeout なら
-   * 毎回 getSnapshot() で現在値を読み再計算するため、長時間でも境界に居続ける。
+   * setInterval を使わない理由: setInterval は再アームごとに微小ドリフトが蓄積し、
+   * 長時間セッションでは累計でズレ得る。自己補正 setTimeout なら毎回 getSnapshot()
+   * で現在値を読み再計算するため、長時間でも分境界に居続ける。
    *
-   * 待ち時間計算の意図 (`#computeDelay`):
-   * - ((remainingMs - 1) % INTERVAL) + 1 で「次の 5 の倍数秒境界までの ms」を
-   *   1..INTERVAL に正規化 (境界ちょうどなら INTERVAL = 5000 を返す)。
-   * - SAFETY_MARGIN_MS を引いて境界より少し手前で発火させる (Math.floor の
-   *   切り捨てで 1 つ前の秒が表示されるのを防ぐ)。
-   * - 引いた結果が 0 以下なら直前に発火済み (= 境界をジッタで超えた直後) なので
-   *   INTERVAL ぶん足して次の境界手前に飛ばす。
+   * 待ち時間計算は computeNextDelay 参照 (分境界の手前で発火させ、残り分表示の
+   * 切り替わりタイミングに合わせる)。
    */
   start(): void {
     this.stop();

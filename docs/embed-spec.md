@@ -21,41 +21,37 @@
 
 ### 2. 作業中タイマー用Embed
 タイマー実行中 (work, break, finalBreak, countdown) に表示。
-5秒ごとに残り時間を更新、フェーズ切替時にリセット投稿。
+残り時間は **円形画像** で表現し、**分刻み** (60 秒ごと) に更新、フェーズ切替時に
+リセット投稿する。秒は表示しない。
 
-更新タイミングは「次の5の倍数秒境界 (残り秒の1の位が0/5)」の **少し手前** に
-吸着させる:
-post の API 往復遅延 (数百ms〜2s) を吸収し、表示が "59→54→49" のように
-半端な値で並ぶのを防ぐ。
+#### 円形タイマー画像 (timer-image.ts / @napi-rs/canvas)
+256x256 PNG をその場で生成し、Embed に attachment:// で添付する。
+- 中央 (大): 残り時間 (分)。`Math.ceil(remainingMs / 60000)` + "分"。countdown は
+  「まもなく」。
+- 中央 (下): フェーズ名 + セット。"作業中 2/4" / "休憩中 3/4" / "最終休憩 最終" /
+  "もうすぐ終了 最終" (canvas はカラー絵文字を描けないので絵文字なしの平文)。
+- 外周リング: フェーズ内進捗 (経過割合)。色はフェーズ別。countdown は満杯。
+  - 注意: skia 系 canvas は `arc(s, s+2π)` (起点ずらしの全周) が描画されないため、
+    全周 (ratio>=1) は `arc(0, 2π)` で描く。
+- 背景: Discord ダークテーマ調の角丸ダークカード (light/dark 両テーマで可読)。
+- 日本語フォント: `Noto Sans CJK JP` を明示指定 (既定 sans-serif だと日本語が
+  豆腐 □ になる)。canvas は OS フォントを使うため稼働環境に CJK フォントが必要。
 
-実装は自己補正 setTimeout チェイン (毎回 getSnapshot() を読んで次の境界手前を
-再計算)。setInterval を使うと再アームごとに微小ドリフトが蓄積するため、長時間
-セッションで境界からズレ得る。
+#### 更新タイミング
+分刻み表示なので更新間隔は 60 秒。「次の分境界の少し手前 (安全マージン 50ms)」に
+吸着させる自己補正 setTimeout チェイン (毎回 getSnapshot() で再計算)。setInterval は
+再アームごとのドリフトが蓄積するため使わない。
 
-安全マージン 50ms: setTimeout は OS タイマー精度 + イベントループ要因で常に
-正の方向にジッタを持つ (1〜数十ms)。境界ちょうど (例 remaining=55,000ms) を
-狙うと jitter で remaining=54,9xx ms 時点で発火し、Math.floor(54999/1000)=54
-で 1 つ前の秒 ("00:54") が表示されてしまう。50ms 手前で発火させると
-jitter ∈ [0, 50ms) は境界を越えず "00:55" が安定して表示される。
-
-レイアウト (一目で「残り時間」「今どのフェーズ」「何セット目」が分かる構造):
+#### Embed レイアウト
 - タイトル: "🍅 ポモドーロタイマー" (固定)
 - 左バー色 (Embed color): フェーズで切替
   - work=赤 (0xE74C3C) / break=緑 (0x2ECC71) / finalBreak=青 (0x3498DB) /
     countdown=黄 (0xF1C40F) / idle・ended=灰 (0x95A5A6)
-- description: zero-width space 1 文字。タイトル直下と最初の field の間に
-  1 行分の空白を作るためだけに使う (実コンテンツは fields 側に置く)。
-- 横並び 3 フィールド (inline: true、左から):
-  - 残り: 平文 "MM:SS" (countdown は "──")。
-    Embed field の value は Markdown 見出し (#, ##) が非対応のため使わない。
-  - フェーズ: "🔥 作業中" / "☕ 休憩中" / "🌙 最終休憩" / "⏰ もうすぐ終了"
-  - セット: "N/M" (work/break) / "最終" (finalBreak/countdown)
-- 進捗バー: inline 行の下に独立 field (inline: false、name は zero-width space で
-  非表示化、value はフェーズ内進捗バー ▰▱ 10 分割)
-- 設定サマリ: 進捗バーから 1 行分の空行を挟む独立 field (inline: false、
-  value 先頭の `<ZWSP>\n` で空行 x1 を作る)。
-  内容は "作業X分 / 休憩Y分 / Mセット / 最終休憩Z分"
-- footer は使わない (自動セパレータ付きで間隔を制御しにくいため)
+- image: 上記の円形タイマー画像 (attachment://timer.png)。時刻・フェーズ・セットは
+  全て画像に集約し、text field では出さない。
+- 設定サマリ field (inline: false、name は zero-width space で非表示):
+  "作業X分 / 休憩Y分 / Mセット / 最終休憩Z分"
+- description / footer は使わない。
 
 ボタン: なし (表示専用。設定アイコンは廃止)
 
