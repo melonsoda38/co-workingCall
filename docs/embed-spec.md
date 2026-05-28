@@ -28,8 +28,9 @@
 256x256 PNG をその場で生成し、Embed に attachment:// で添付する。
 - 中央 (大): 残り時間 (分)。`Math.ceil(remainingMs / 60000)` + "分"。countdown は
   「まもなく」。
-- 中央 (下): フェーズ名 + セット。"作業中 2/4" / "休憩中 3/4" / "最終休憩 最終" /
-  "もうすぐ終了 最終" (canvas はカラー絵文字を描けないので絵文字なしの平文)。
+- 中央 (下): フェーズ名 + セット。"作業中 2/4" / "休憩中 3/4" / "最終休憩" /
+  "もうすぐ終了 最終" (finalBreak はセット表記なし。canvas はカラー絵文字を描けない
+  ので絵文字なしの平文)。
 - 外周リング: フェーズ内進捗 (経過割合)。色はフェーズ別。countdown は満杯。
   - 注意: skia 系 canvas は `arc(s, s+2π)` (起点ずらしの全周) が描画されないため、
     全周 (ratio>=1) は `arc(0, 2π)` で描く。
@@ -43,15 +44,14 @@
 再アームごとのドリフトが蓄積するため使わない。
 
 #### Embed レイアウト
-- タイトル: "🍅 ポモドーロタイマー" (固定)
+- タイトル: "🍅 ポモドーロタイマー" (固定。直下に余白行は入れない)
 - 左バー色 (Embed color): フェーズで切替
-  - work=赤 (0xE74C3C) / break=緑 (0x2ECC71) / finalBreak=青 (0x3498DB) /
+  - work=青 (0x3498DB) / break=緑 (0x2ECC71) / finalBreak=灰 (0x95A5A6) /
     countdown=黄 (0xF1C40F) / idle・ended=灰 (0x95A5A6)
 - image: 上記の円形タイマー画像 (attachment://timer.png)。時刻・フェーズ・セットは
   全て画像に集約し、text field では出さない。
-- 設定サマリ field (inline: false、name は zero-width space で非表示):
-  "作業X分 / 休憩Y分 / Mセット / 最終休憩Z分"
-- description / footer は使わない。
+- 設定サマリ footer (画像の下に描画): "作業X分 / 休憩Y分 / Mセット / 最終休憩Z分"
+- description / text field は使わない。
 
 ボタン: なし (表示専用。設定アイコンは廃止)
 
