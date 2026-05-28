@@ -19,8 +19,8 @@ import {
  */
 export const ENDING_DELAY_MS = 3_000;
 
-/** お疲れさま投稿を削除するまでの遅延 (投稿から 30 秒)。 */
-export const FAREWELL_DELETE_DELAY_MS = 30_000;
+/** お疲れさま投稿を削除するまでの遅延 (投稿から 15 秒)。 */
+export const FAREWELL_DELETE_DELAY_MS = 15_000;
 
 /**
  * 終了演出 (US-19) で EmbedManager が呼ぶ外部操作 (VC 系の責務)。
@@ -135,7 +135,7 @@ export class EmbedManager {
    * 明示的に delete する。
    */
   #welcomeMessageId: string | null = null;
-  /** お疲れさま投稿の遅延削除 (投稿30秒後) 用タイマー。 */
+  /** お疲れさま投稿の遅延削除 (投稿15秒後) 用タイマー。 */
   #farewellDeleteTimer: NodeJS.Timeout | null = null;
   #updater: TimerEmbedUpdater | null = null;
   /** 終了演出の二重発火防止 (ended イベントと空 VC 退出など複数経路から起動し得る)。 */
@@ -205,7 +205,7 @@ export class EmbedManager {
    */
   async onTimerStart(): Promise<void> {
     this.#currentPhase = 'work';
-    // 前回 ended のお疲れさま (30秒削除待ち) や、再起動で id 追跡を失った孤児の
+    // 前回 ended のお疲れさま (15秒削除待ち) や、再起動で id 追跡を失った孤児の
     // 歓迎/お疲れさまテキストを、新セッションの歓迎投稿前に掃除する。
     this.#cancelFarewellDeletion();
     await this.#channel.purgeOwnTexts([WELCOME_CONTENT, FAREWELL_CONTENT]);
@@ -253,8 +253,8 @@ export class EmbedManager {
    * ended: 終了演出フロー (ending-spec §第二段階・US-19)。
    * finish.mp3 → タイマー Embed 削除 → お疲れさま投稿 → 3秒余韻 →
    * VC 全員強制退出 → bot 退出 → idle 復帰。
-   * 新スタート Embed は「お疲れさま投稿の削除 (投稿30秒後)」の直後に投稿する
-   * (#scheduleEndingFollowup)。お疲れさまを30秒見せてから次のスタート Embed に切り替える。
+   * 新スタート Embed は「お疲れさま投稿の削除 (投稿15秒後)」の直後に投稿する
+   * (#scheduleEndingFollowup)。お疲れさまを15秒見せてから次のスタート Embed に切り替える。
    *
    * 二重発火防止 (#isEnding): ended イベント + 空 VC 30 秒退出など複数経路から
    * 同時起動し得るため、最初の 1 回のみ通す。エラー時も必ず #isEnding を解除する。
@@ -276,7 +276,7 @@ export class EmbedManager {
       // 2. タイマー Embed 削除。
       await this.#deleteTimerEmbed();
       // 3. お疲れさま投稿 (通常通知・SuppressNotifications なし)。
-      //    Embed なしの単発テキスト。投稿から 30 秒後に「お疲れさま削除 → 新スタート
+      //    Embed なしの単発テキスト。投稿から 15 秒後に「お疲れさま削除 → 新スタート
       //    Embed 投稿」を行うフォローアップを setTimeout で予約する (終了演出は止めない)。
       const farewell = await this.#channel.post(buildFarewellMessage());
       this.#logger.info({ messageId: farewell.id }, 'お疲れさま投稿 完了');
@@ -300,7 +300,7 @@ export class EmbedManager {
           this.#logger.warn({ err }, 'bot の VC 退出に失敗 (best-effort)');
         }
       }
-      // 7. お疲れさま投稿の削除は step 3 で予約済み (投稿30秒後)。ここでは行わない。
+      // 7. お疲れさま投稿の削除は step 3 で予約済み (投稿15秒後)。ここでは行わない。
       // ご参加ありがとう投稿は通常 countdown 突入時に削除済み。countdown を経ず
       // ここへ来る経路 (空 VC 早期退出) の保険として再度削除を試みる (済みなら no-op)。
       await this.#deleteWelcomeMessage();
@@ -311,7 +311,7 @@ export class EmbedManager {
       //    updater/debouncer は既にクリア済み。
       this.#timer.reset();
       this.#currentPhase = 'idle';
-      // 9. 新スタート Embed はここでは出さない。お疲れさま削除 (投稿30秒後) の直後に
+      // 9. 新スタート Embed はここでは出さない。お疲れさま削除 (投稿15秒後) の直後に
       //    #scheduleEndingFollowup から投稿する。idle 自体へはここで復帰する。
       this.#logger.info('終了演出フロー完了 idle 復帰 (スタート Embed はお疲れさま削除後)');
     } finally {
@@ -358,7 +358,7 @@ export class EmbedManager {
 
   /**
    * 起動時などに、id 追跡を持たない孤児の歓迎/お疲れさまプレーンテキストを掃除する。
-   * bot 異常終了・再起動で id を失った残骸 (例: 終了30秒前の再起動で残るお疲れさま投稿) を
+   * bot 異常終了・再起動で id を失った残骸 (例: 終了15秒前の再起動で残るお疲れさま投稿) を
    * 本文一致で回収する。アクティブセッションが無い前提で呼ぶ (起動直後・idle)。best-effort。
    */
   async purgeOrphanTexts(): Promise<void> {
@@ -467,7 +467,7 @@ export class EmbedManager {
   }
 
   /**
-   * 終了フォローアップを投稿から FAREWELL_DELETE_DELAY_MS (30秒) 後に予約する:
+   * 終了フォローアップを投稿から FAREWELL_DELETE_DELAY_MS (15秒) 後に予約する:
    * お疲れさま投稿を削除し、その直後に新スタート Embed を投稿する。
    * 終了演出フローはブロックせず setTimeout で予約。新セッション開始 / idle 復帰時は解除する。
    * 二重 ended は #isEnding で防止済みだが、念のため直前の予約は破棄して上書きする。
@@ -484,20 +484,20 @@ export class EmbedManager {
 
   /**
    * お疲れさま投稿を削除し、その後に新スタート Embed を投稿する (お疲れさま削除後に出す)。
-   * 削除・投稿はいずれも best-effort。30秒の間に新セッションが始まった場合 (in-flight race)
+   * 削除・投稿はいずれも best-effort。15秒の間に新セッションが始まった場合 (in-flight race)
    * は #currentPhase !== 'idle' でスタート Embed 投稿をスキップし、進行中セッションを尊重する。
    */
   async #runEndingFollowup(farewellMessageId: string): Promise<void> {
     try {
       await this.#channel.delete(farewellMessageId);
-      this.#logger.info({ messageId: farewellMessageId }, 'お疲れさま投稿を削除 (投稿30秒後)');
+      this.#logger.info({ messageId: farewellMessageId }, 'お疲れさま投稿を削除 (投稿15秒後)');
     } catch (err) {
       this.#logger.warn(
         { err, messageId: farewellMessageId },
         'お疲れさま投稿の削除に失敗 (best-effort)',
       );
     }
-    // 30秒の間に新セッションが開始していたら (cancel が間に合わなかった in-flight)、
+    // 15秒の間に新セッションが開始していたら (cancel が間に合わなかった in-flight)、
     // スタート Embed は出さない。
     if (this.#currentPhase !== 'idle') {
       return;

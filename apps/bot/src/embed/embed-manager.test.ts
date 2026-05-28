@@ -165,12 +165,12 @@ describe('EmbedManager', () => {
     await vi.advanceTimersByTimeAsync(0);
     timer.emit('phaseChange', makeSnapshot('break')); // Embed post: 再投稿 (歓迎は再post しない)
     await vi.advanceTimersByTimeAsync(0);
-    timer.emit('ended', makeSnapshot('ended')); // text post: お疲れさま (新スタートは30秒後)
+    timer.emit('ended', makeSnapshot('ended')); // text post: お疲れさま (新スタートは15秒後)
     await vi.advanceTimersByTimeAsync(0);
-    // 新スタート Embed はお疲れさま削除 (投稿30秒後) の直後に投稿される。
-    await vi.advanceTimersByTimeAsync(30_000);
+    // 新スタート Embed はお疲れさま削除 (投稿15秒後) の直後に投稿される。
+    await vi.advanceTimersByTimeAsync(15_000);
 
-    // Embed 投稿は 4 回 (onIdle / work / break / ended後30秒の新スタート)。
+    // Embed 投稿は 4 回 (onIdle / work / break / ended後15秒の新スタート)。
     // テキスト投稿 (Embed なし) は歓迎 + お疲れさまの 2 回追加 = post 計 6 回。
     expect(post).toHaveBeenCalledTimes(6);
     // purge は Embed 投稿 4 回分だけ。歓迎・お疲れさまテキストの前には purge を入れない。
@@ -249,7 +249,7 @@ describe('EmbedManager', () => {
     expect(post.mock.calls.length).toBe(before);
   });
 
-  it('countdown で edit、ended で削除→お疲れさま投稿→3秒待機、新スタートはお疲れさま削除後(30秒後)', async () => {
+  it('countdown で edit、ended で削除→お疲れさま投稿→3秒待機、新スタートはお疲れさま削除後(15秒後)', async () => {
     const { channel, edit, del } = fakeChannel();
     const timer = new FakeTimer();
     // endingDelay を即解決にして fake timers の advanceTimersByTime 依存を最小化する
@@ -272,8 +272,8 @@ describe('EmbedManager', () => {
     expect(del).toHaveBeenCalled();
     // この時点ではスタート Embed はまだ出さない (お疲れさま削除後に投稿)。
     expect(m.startEmbedId).toBeNull();
-    // 30秒後: お疲れさま削除 → 新スタート Embed 投稿。
-    await vi.advanceTimersByTimeAsync(30_000);
+    // 15秒後: お疲れさま削除 → 新スタート Embed 投稿。
+    await vi.advanceTimersByTimeAsync(15_000);
     expect(m.startEmbedId).not.toBeNull();
   });
 });
@@ -432,7 +432,7 @@ describe('EmbedManager 終了演出フロー (US-19)', () => {
     vi.useRealTimers();
   });
 
-  it('ended 突入で playFinish→Embed削除→お疲れさま投稿→余韻→kick→disconnect→新スタートEmbed、お疲れさま削除は30秒後', async () => {
+  it('ended 突入で playFinish→Embed削除→お疲れさま投稿→余韻→kick→disconnect→新スタートEmbed、お疲れさま削除は15秒後', async () => {
     const { channel, post, del, calls } = fakeChannel();
     const sound = fakeSound();
     const ending = fakeEndingActions();
@@ -473,7 +473,7 @@ describe('EmbedManager 終了演出フロー (US-19)', () => {
     // fakeChannel は post ごとに m1, m2... を返す:
     // timerEmbed=m1, welcome=m2, farewell=m3。
     // 歓迎投稿 (m2) は終了演出中に削除されるが、お疲れさま投稿 (m3) はこの時点では
-    // まだ削除されていない (投稿30秒後)。
+    // まだ削除されていない (投稿15秒後)。
     expect(del.mock.calls.map((c) => c[0])).toContain('m2');
     expect(del.mock.calls.map((c) => c[0])).not.toContain('m3');
     expect(m.welcomeMessageId).toBeNull();
@@ -483,8 +483,8 @@ describe('EmbedManager 終了演出フロー (US-19)', () => {
     // この時点ではスタート Embed はまだ投稿していない (お疲れさま削除後に投稿)。
     expect(m.startEmbedId).toBeNull();
 
-    // 投稿から 30 秒後: お疲れさま (m3) を削除し、その直後に新スタート Embed を投稿。
-    await vi.advanceTimersByTimeAsync(30_000);
+    // 投稿から 15 秒後: お疲れさま (m3) を削除し、その直後に新スタート Embed を投稿。
+    await vi.advanceTimersByTimeAsync(15_000);
     expect(del.mock.calls.map((c) => c[0])).toContain('m3');
     expect(m.startEmbedId).not.toBeNull();
     // 削除(m3) → 新スタート post の順 (お疲れさま削除後にスタートを出す)。
@@ -494,7 +494,7 @@ describe('EmbedManager 終了演出フロー (US-19)', () => {
     expect(postIndices.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('お疲れさま投稿の30秒後削除が失敗しても終了演出 (新スタートEmbed) は完了し例外も伝播しない (best-effort)', async () => {
+  it('お疲れさま投稿の15秒後削除が失敗しても終了演出 (新スタートEmbed) は完了し例外も伝播しない (best-effort)', async () => {
     const { channel, del } = fakeChannel();
     // m3 (お疲れさま投稿。post 順は m1=timer / m2=welcome / m3=farewell) の削除だけ失敗させる。
     del.mockImplementation((id: string) => {
@@ -525,9 +525,9 @@ describe('EmbedManager 終了演出フロー (US-19)', () => {
     expect(m.startEmbedId).toBeNull();
     expect(del.mock.calls.map((c) => c[0])).not.toContain('m3');
 
-    // 30秒後: お疲れさま削除を試行 → reject するが catch で握りつぶし、その後も
+    // 15秒後: お疲れさま削除を試行 → reject するが catch で握りつぶし、その後も
     // スタート Embed 投稿は実行される (削除失敗は後段をブロックしない)。
-    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(15_000);
     expect(del.mock.calls.map((c) => c[0])).toContain('m3');
     expect(m.startEmbedId).not.toBeNull();
   });
@@ -562,8 +562,8 @@ describe('EmbedManager 終了演出フロー (US-19)', () => {
       (c) => c[0].content === 'お疲れさまでした 👋',
     ).length;
     expect(farewellCount).toBe(1);
-    // スタート Embed は30秒後 (お疲れさま削除後) に 1 回だけ投稿される。
-    await vi.advanceTimersByTimeAsync(30_000);
+    // スタート Embed は15秒後 (お疲れさま削除後) に 1 回だけ投稿される。
+    await vi.advanceTimersByTimeAsync(15_000);
     expect(m.startEmbedId).not.toBeNull();
   });
 
@@ -591,8 +591,8 @@ describe('EmbedManager 終了演出フロー (US-19)', () => {
     ).length;
     expect(farewellCount).toBe(1);
     expect(m.startEmbedId).toBeNull();
-    // お疲れさま削除 (30秒後) の直後に新スタート Embed を投稿。
-    await vi.advanceTimersByTimeAsync(30_000);
+    // お疲れさま削除 (15秒後) の直後に新スタート Embed を投稿。
+    await vi.advanceTimersByTimeAsync(15_000);
     expect(m.startEmbedId).not.toBeNull();
   });
 
@@ -619,8 +619,8 @@ describe('EmbedManager 終了演出フロー (US-19)', () => {
 
     expect(ending.kickAllHumans).toHaveBeenCalledTimes(1);
     expect(ending.disconnectBot).toHaveBeenCalledTimes(1);
-    // 新スタート Embed はお疲れさま削除 (30秒後) の直後に投稿される。
-    await vi.advanceTimersByTimeAsync(30_000);
+    // 新スタート Embed はお疲れさま削除 (15秒後) の直後に投稿される。
+    await vi.advanceTimersByTimeAsync(15_000);
     expect(m.startEmbedId).not.toBeNull();
   });
 });
@@ -824,7 +824,7 @@ describe('EmbedManager 孤児テキスト掃除 / isEnding (監査観察事項1-
     expect(contents).toContain('お疲れさまでした 👋');
   });
 
-  it('ended で予約したお疲れさま30秒削除は、30秒前に新セッションが始まると発火しない', async () => {
+  it('ended で予約したお疲れさま15秒削除は、15秒前に新セッションが始まると発火しない', async () => {
     const { channel, del } = fakeChannel();
     const timer = new FakeTimer();
     // 構築でタイマーイベントを購読する (副作用)。変数参照は不要。
@@ -835,20 +835,20 @@ describe('EmbedManager 孤児テキスト掃除 / isEnding (監査観察事項1-
       logger,
       endingDelay: () => Promise.resolve(),
     });
-    // 1 セッション目: work → ended。お疲れさま (m3) の30秒削除を予約。
+    // 1 セッション目: work → ended。お疲れさま (m3) の15秒削除を予約。
     timer.emit('phaseChange', makeSnapshot('work'));
     await vi.advanceTimersByTimeAsync(0);
     timer.emit('ended', makeSnapshot('ended'));
     await vi.advanceTimersByTimeAsync(0);
 
-    // 30秒経過前 (10秒後) に新セッション開始 → onTimerStart が予約をキャンセル。
+    // 15秒経過前 (10秒後) に新セッション開始 → onTimerStart が予約をキャンセル。
     timer.snapshot = makeSnapshot('idle');
     await vi.advanceTimersByTimeAsync(10_000);
     timer.emit('phaseChange', makeSnapshot('work'));
     await vi.advanceTimersByTimeAsync(0);
 
     // 新セッション開始直後の delete 数を基準に、さらに 60 秒進めても増えないこと
-    // = 予約済みの「お疲れさま30秒削除」タイマーがキャンセルされ発火していないこと。
+    // = 予約済みの「お疲れさま15秒削除」タイマーがキャンセルされ発火していないこと。
     const delsAfterRestart = del.mock.calls.length;
     await vi.advanceTimersByTimeAsync(60_000);
     expect(del.mock.calls.length).toBe(delsAfterRestart);
