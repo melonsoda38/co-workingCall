@@ -28,9 +28,9 @@ const snap = (over: Partial<TimerSnapshot>): TimerSnapshot => ({
 
 describe('phaseColorHex', () => {
   it('フェーズ別の 16進カラー', () => {
-    expect(phaseColorHex('work')).toBe('#e74c3c');
+    expect(phaseColorHex('work')).toBe('#3498db');
     expect(phaseColorHex('break')).toBe('#2ecc71');
-    expect(phaseColorHex('finalBreak')).toBe('#3498db');
+    expect(phaseColorHex('finalBreak')).toBe('#95a5a6');
     expect(phaseColorHex('countdown')).toBe('#f1c40f');
     expect(phaseColorHex('idle')).toBe('#95a5a6');
     expect(phaseColorHex('ended')).toBe('#95a5a6');
@@ -94,10 +94,10 @@ describe('phaseTextPlain', () => {
 });
 
 describe('setText', () => {
-  it('work/break は N/M、finalBreak/countdown は「最終」、その他は空', () => {
+  it('work/break は N/M、countdown は「最終」、finalBreak・その他は空', () => {
     expect(setText(snap({ phase: 'work', currentSet: 2, totalSets: 4 }))).toBe('2/4');
     expect(setText(snap({ phase: 'break', currentSet: 3, totalSets: 4 }))).toBe('3/4');
-    expect(setText(snap({ phase: 'finalBreak' }))).toBe('最終');
+    expect(setText(snap({ phase: 'finalBreak' }))).toBe('');
     expect(setText(snap({ phase: 'countdown' }))).toBe('最終');
     expect(setText(snap({ phase: 'idle' }))).toBe('');
   });

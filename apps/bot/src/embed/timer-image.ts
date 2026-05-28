@@ -21,11 +21,11 @@ export const TIMER_IMAGE_SIZE = 256;
 export function phaseColorHex(phase: TimerPhase): string {
   switch (phase) {
     case 'work':
-      return '#e74c3c';
+      return '#3498db';
     case 'break':
       return '#2ecc71';
     case 'finalBreak':
-      return '#3498db';
+      return '#95a5a6';
     case 'countdown':
       return '#f1c40f';
     case 'idle':
@@ -100,15 +100,15 @@ export function phaseTextPlain(snapshot: TimerSnapshot): string {
   }
 }
 
-/** セット進捗 ("N/M" / finalBreak・countdown は「最終」/ その他は空)。 */
+/** セット進捗 ("N/M" / countdown は「最終」/ finalBreak・その他は空)。 */
 export function setText(snapshot: TimerSnapshot): string {
   switch (snapshot.phase) {
     case 'work':
     case 'break':
       return `${String(snapshot.currentSet)}/${String(snapshot.totalSets)}`;
-    case 'finalBreak':
     case 'countdown':
       return '最終';
+    case 'finalBreak':
     case 'idle':
     case 'ended':
       return '';
