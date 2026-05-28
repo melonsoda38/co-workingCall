@@ -53,21 +53,21 @@ T+3秒     VC全員強制退出
 2. 既存Embed削除
 3. "お疲れさまでした 👋" を通常メッセージとして投稿
    (SuppressNotifications 付けない、ちゃんと通知音を鳴らす)
-   投稿の messageId は後段で削除するため保持する
+   投稿の messageId を保持し、投稿から 30 秒後の削除を setTimeout で予約する
+   (FAREWELL_DELETE_DELAY_MS = 30_000)。削除は終了演出フローをブロックしない。
 4. 余韻待機 (3秒、ENDING_DELAY_MS = 3_000)
 5. VC内の全GuildMemberに対して voice.disconnect()
 6. bot即時退出 (カウントダウン経由しない)
    - voiceConnection.destroy()
    - emptyVcTimeoutTimer をキャンセル
-7. お疲れさま投稿を削除 (歓迎投稿は原則 countdown 突入時に削除済み)
-   - お疲れさま投稿は Embed なしのプレーンテキストで purgeOwnEmbeds の対象外
-     なので明示削除する
-   - 歓迎投稿 (welcomeMessageId・「ご参加ありがとうございます〜」) は countdown
-     突入時 (終了予告音の再生直後) に削除する設計。ここでは countdown を経ず
-     onEnded へ来る経路 (空 VC 早期退出) の保険として再度削除を試みる (済みなら no-op)
-   - 削除失敗は best-effort (warn ログのみで継続)
+7. 歓迎投稿 (welcomeMessageId・「ご参加ありがとうございます〜」) の削除
+   - countdown 突入時 (終了予告音の再生直後) に削除する設計。ここでは countdown を
+     経ず onEnded へ来る経路 (空 VC 早期退出) の保険として再度削除を試みる (済みなら no-op)
+   - お疲れさま投稿は step 3 で予約済みの「投稿30秒後」削除に従う (ここでは削除しない)。
+     Embed なしのプレーンテキストで purgeOwnEmbeds の対象外。削除失敗は best-effort
 8. SessionState をリセット (詳細は後述)
 9. 新しい作業スタート用Embedを投稿 (SuppressNotifications)
+   - お疲れさま投稿はこの時点ではまだ残り、投稿30秒後に削除される (新スタートEmbedと併存)
 10. idle に戻る (process.exit しない)
 ```
 
@@ -168,13 +168,13 @@ ended処理の最後で以下をクリア:
 [ended] 突入
    ├ finish.mp3 再生開始
    ├ Embed削除
-   ├ "お疲れさまでした" 投稿 (通常通知) ※ messageId 保持
+   ├ "お疲れさまでした" 投稿 (通常通知) ※ messageId 保持・投稿30秒後の削除を予約
    ├ 3秒待機 (ENDING_DELAY_MS)
    ├ VC全員強制退出
    ├ bot即時退出
-   ├ "お疲れさまでした" 投稿を削除 ("ご参加ありがとう" は countdown 時に削除済み・保険で再削除)
+   ├ "ご参加ありがとう" 削除 (countdown 時に削除済み・保険で再削除)
    ├ SessionState リセット
-   └ 新スタート用Embed投稿
+   └ 新スタート用Embed投稿 (お疲れさま投稿はまだ残る)
    ↓
-[idle] 待機状態に戻る
+[idle] 待機状態に戻る (お疲れさま投稿は投稿30秒後に削除)
 ```

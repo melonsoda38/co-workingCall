@@ -422,7 +422,7 @@ describe('EmbedManager 終了演出フロー (US-19)', () => {
     vi.useRealTimers();
   });
 
-  it('ended 突入で playFinish→Embed削除→お疲れさま投稿→余韻→kick→disconnect→お疲れさま削除→新スタートEmbed の順で実行', async () => {
+  it('ended 突入で playFinish→Embed削除→お疲れさま投稿→余韻→kick→disconnect→新スタートEmbed、お疲れさま削除は30秒後', async () => {
     const { channel, post, del, calls } = fakeChannel();
     const sound = fakeSound();
     const ending = fakeEndingActions();
@@ -460,23 +460,28 @@ describe('EmbedManager 終了演出フロー (US-19)', () => {
     // VC 全員強制退出 → bot 退出の順。
     expect(ending.kickAllHumans).toHaveBeenCalledTimes(1);
     expect(ending.disconnectBot).toHaveBeenCalledTimes(1);
-    // お疲れさま投稿 (m3) と歓迎投稿 (m2) が新スタート Embed 投稿前に削除される。
     // fakeChannel は post ごとに m1, m2... を返す:
     // timerEmbed=m1, welcome=m2, farewell=m3, new start=m4。
-    expect(del.mock.calls.map((c) => c[0])).toContain('m3');
+    // 歓迎投稿 (m2) は終了演出中に削除されるが、お疲れさま投稿 (m3) はこの時点では
+    // まだ削除されていない (投稿30秒後に削除予約)。
     expect(del.mock.calls.map((c) => c[0])).toContain('m2');
+    expect(del.mock.calls.map((c) => c[0])).not.toContain('m3');
     expect(m.welcomeMessageId).toBeNull();
     // タイマーが reset され、次の ▶開始で getSnapshot().phase==='idle' になる。
     expect(timer.resetCallCount).toBe(1);
     expect(timer.getSnapshot().phase).toBe('idle');
-    // 新スタート Embed が投稿され、idle に戻る。
+    // 新スタート Embed が投稿され、idle に戻る (お疲れさま削除を待たない)。
     expect(m.startEmbedId).not.toBeNull();
     // 呼び出し順序: ended 中の post 列は farewell + 新スタート Embed の最低 2 回。
     const postIndices = calls.map((c, i) => (c === 'post' ? i : -1)).filter((i) => i >= 0);
     expect(postIndices.length).toBeGreaterThanOrEqual(2);
+
+    // 投稿から 30 秒後にお疲れさま投稿 (m3) が削除される。
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(del.mock.calls.map((c) => c[0])).toContain('m3');
   });
 
-  it('お疲れさま投稿の削除に失敗しても新スタート Embed は投稿される (best-effort)', async () => {
+  it('お疲れさま投稿の30秒後削除が失敗しても終了演出 (新スタートEmbed) は完了し例外も伝播しない (best-effort)', async () => {
     const { channel, del } = fakeChannel();
     // m3 (お疲れさま投稿。post 順は m1=timer / m2=welcome / m3=farewell) の削除だけ失敗させる。
     del.mockImplementation((id: string) => {
@@ -503,10 +508,13 @@ describe('EmbedManager 終了演出フロー (US-19)', () => {
     timer.emit('ended', makeSnapshot('ended'));
     await vi.advanceTimersByTimeAsync(0);
 
-    // 削除は試行された (失敗しても呼び出し自体は記録される)。
-    expect(del.mock.calls.map((c) => c[0])).toContain('m3');
-    // 削除失敗でも新スタート Embed は投稿されている。
+    // お疲れさま削除 (30秒後予約) を待たず、新スタート Embed は投稿済み。
     expect(m.startEmbedId).not.toBeNull();
+    expect(del.mock.calls.map((c) => c[0])).not.toContain('m3');
+
+    // 30秒後の削除を試行 → reject するが void+catch で握りつぶし例外は伝播しない。
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(del.mock.calls.map((c) => c[0])).toContain('m3');
   });
 
   it('isEnding ガード: 二重 ended でも終了演出は 1 回のみ走る', async () => {
