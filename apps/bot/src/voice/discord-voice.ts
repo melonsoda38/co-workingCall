@@ -129,6 +129,10 @@ export async function setupVoiceFeature(
   });
   voiceManagerRef.current = voiceManager;
 
+  // 起動時クリーンアップ: 再起動で id 追跡を失った孤児の歓迎/お疲れさまテキストを掃除する
+  // (例: ended 直後30秒以内の再起動で残るお疲れさま投稿)。アクティブセッションは無い。
+  await session.embedManager.purgeOrphanTexts();
+
   client.on(Events.VoiceStateUpdate, (oldState, newState) => {
     handleVoiceStateUpdate(oldState, newState, channel, config.voiceChannelId, voiceManager);
   });

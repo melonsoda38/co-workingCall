@@ -50,7 +50,9 @@ export async function handleStartButton(
       return;
     }
 
-    if (session.timer.getSnapshot().phase !== 'idle') {
+    // 終了演出フロー進行中は phase が経路で異なる (自然 ended='ended' / 空VC経由='idle')
+    // ため、phase だけでなく isEnding も見て一貫して弾く。
+    if (session.timer.getSnapshot().phase !== 'idle' || session.embedManager.isEnding) {
       await replyEphemeral('すでにタイマーが動作中です');
       return;
     }

@@ -5,8 +5,8 @@ import { buildStartEmbedMessage } from './start-embed.js';
 import { buildTimerEmbedContent, buildTimerEmbedMessage } from './timer-embed.js';
 import { RepostDebouncer } from './repost-debouncer.js';
 import { TimerEmbedUpdater } from './timer-embed-updater.js';
-import { buildFarewellMessage } from './farewell-message.js';
-import { buildWelcomeMessage } from './welcome-message.js';
+import { buildFarewellMessage, FAREWELL_CONTENT } from './farewell-message.js';
+import { buildWelcomeMessage, WELCOME_CONTENT } from './welcome-message.js';
 import {
   playPhaseTransitionSound,
   phaseTransitionSound,
@@ -57,6 +57,11 @@ export interface EmbedChannel {
    * 含めて「テキスト欄に Embed は常に 1 つ」を保証する。best-effort。
    */
   purgeOwnEmbeds(): Promise<void>;
+  /**
+   * bot 自身が投稿した「指定本文のプレーンテキスト」(歓迎/お疲れさま) を掃除する。
+   * id 追跡を失った孤児 (異常終了・再起動) を本文一致で回収する。best-effort。
+   */
+  purgeOwnTexts(contents: string[]): Promise<void>;
 }
 
 /** EmbedManager が必要とするタイマーの最小インターフェース (PomodoroTimer 互換)。 */
@@ -113,6 +118,14 @@ export class EmbedManager {
   readonly #soundNotifier: PhaseSoundNotifier | undefined;
   readonly #endingActions: EndingActions | undefined;
   readonly #endingDelay: EndingDelay;
+  /**
+   * EmbedManager 自身が追跡するフェーズ。PomodoroTimer も内部に現在フェーズを持つが、
+   * EmbedManager はフェーズ切替音 (from→to) と countdown 二重発火ガードのために
+   * 「直前フェーズ」の記憶が必要なため独立に保持する (timer のイベントは現在値のみ渡す)。
+   * 整合の前提: PomodoroTimer は 1 tick 内で必ず phaseChange を先に emit してから
+   * countdown/ended を emit する (pomodoro-timer.ts #tick)。この順序により
+   * #onPhaseChange → onCountdownEnter/onEnded の順で #currentPhase が更新される。
+   */
   #currentPhase: TimerPhase = 'idle';
   #startEmbedId: string | null = null;
   #timerEmbedId: string | null = null;
@@ -163,16 +176,23 @@ export class EmbedManager {
   get welcomeMessageId(): string | null {
     return this.#welcomeMessageId;
   }
+  /** 終了演出フロー進行中か (▶開始の二重起動防止に commands 側から参照)。 */
+  get isEnding(): boolean {
+    return this.#isEnding;
+  }
 
   /** idle: スタート用 Embed を投稿 (タイマー用・既存スタート用が残っていれば削除)。 */
   async onIdle(): Promise<void> {
     this.#updater?.stop();
     this.#updater = null;
     this.#debouncer.cancel();
+    this.#cancelFarewellDeletion();
     this.#currentPhase = 'idle';
     await this.#deleteTimerEmbed();
     // /pomo stop など onEnded を経由しない経路でも welcome を残さない。
     await this.#deleteWelcomeMessage();
+    // 歓迎/お疲れさまの孤児プレーンテキスト (id 追跡漏れ・前回 ended の残り) を本文一致で掃除。
+    await this.#channel.purgeOwnTexts([WELCOME_CONTENT, FAREWELL_CONTENT]);
     // 既存スタート Embed を消してから出し直す (/pomo stop の重複投稿防止・冪等化)。
     await this.#deleteStartEmbed();
     const posted = await this.#postFresh(buildStartEmbedMessage(this.#config));
@@ -185,6 +205,10 @@ export class EmbedManager {
    */
   async onTimerStart(): Promise<void> {
     this.#currentPhase = 'work';
+    // 前回 ended のお疲れさま (30秒削除待ち) や、再起動で id 追跡を失った孤児の
+    // 歓迎/お疲れさまテキストを、新セッションの歓迎投稿前に掃除する。
+    this.#cancelFarewellDeletion();
+    await this.#channel.purgeOwnTexts([WELCOME_CONTENT, FAREWELL_CONTENT]);
     await this.#deleteStartEmbed();
     const snapshot = this.#timer.getSnapshot();
     const posted = await this.#postFresh(buildTimerEmbedMessage(snapshot, this.#config));
@@ -331,6 +355,15 @@ export class EmbedManager {
     this.#config = config;
   }
 
+  /**
+   * 起動時などに、id 追跡を持たない孤児の歓迎/お疲れさまプレーンテキストを掃除する。
+   * bot 異常終了・再起動で id を失った残骸 (例: 終了30秒前の再起動で残るお疲れさま投稿) を
+   * 本文一致で回収する。アクティブセッションが無い前提で呼ぶ (起動直後・idle)。best-effort。
+   */
+  async purgeOrphanTexts(): Promise<void> {
+    await this.#channel.purgeOwnTexts([WELCOME_CONTENT, FAREWELL_CONTENT]);
+  }
+
   async #onPhaseChange(snapshot: TimerSnapshot): Promise<void> {
     const to = snapshot.phase;
     if (to !== 'work' && to !== 'break' && to !== 'finalBreak') {
@@ -430,6 +463,14 @@ export class EmbedManager {
    * 二重 ended は #isEnding で防いでいるため通常は同時に 1 つだけだが、念のため
    * 直前の予約が残っていれば破棄して上書きする。
    */
+  /** 予約済みのお疲れさま遅延削除タイマーを解除する (新セッション開始・idle 復帰時)。 */
+  #cancelFarewellDeletion(): void {
+    if (this.#farewellDeleteTimer !== null) {
+      clearTimeout(this.#farewellDeleteTimer);
+      this.#farewellDeleteTimer = null;
+    }
+  }
+
   #scheduleFarewellDeletion(messageId: string): void {
     if (this.#farewellDeleteTimer !== null) {
       clearTimeout(this.#farewellDeleteTimer);
