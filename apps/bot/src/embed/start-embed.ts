@@ -25,7 +25,7 @@ export function formatConfigSummary(config: BotConfig): string {
  */
 export function buildStartEmbedMessage(config: BotConfig): MessageCreateOptions {
   const embed = new EmbedBuilder()
-    .setTitle('🍅 ポモドーロタイマー')
+    .setTitle('Timer')
     .setDescription('ボタンを押して作業を始めましょう')
     .addFields({ name: '現在の設定', value: formatConfigSummary(config) });
 

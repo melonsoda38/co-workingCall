@@ -83,7 +83,10 @@ export function centerText(snapshot: TimerSnapshot): { main: string; unit: strin
   }
 }
 
-/** フェーズ名 (絵文字なし。canvas はカラー絵文字を描けないため平文)。 */
+/**
+ * フェーズ名 (絵文字なし。canvas はカラー絵文字を描けないため平文)。
+ * countdown は中央の「まもなく」だけで完結させるため下段は空。
+ */
 export function phaseTextPlain(snapshot: TimerSnapshot): string {
   switch (snapshot.phase) {
     case 'work':
@@ -93,22 +96,20 @@ export function phaseTextPlain(snapshot: TimerSnapshot): string {
     case 'finalBreak':
       return '最終休憩';
     case 'countdown':
-      return 'もうすぐ終了';
     case 'idle':
     case 'ended':
       return '';
   }
 }
 
-/** セット進捗 ("N/M" / countdown は「最終」/ finalBreak・その他は空)。 */
+/** セット進捗 ("N/M" / それ以外は空。countdown は中央「まもなく」のみで下段なし)。 */
 export function setText(snapshot: TimerSnapshot): string {
   switch (snapshot.phase) {
     case 'work':
     case 'break':
       return `${String(snapshot.currentSet)}/${String(snapshot.totalSets)}`;
-    case 'countdown':
-      return '最終';
     case 'finalBreak':
+    case 'countdown':
     case 'idle':
     case 'ended':
       return '';

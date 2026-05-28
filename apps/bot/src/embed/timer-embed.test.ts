@@ -27,7 +27,7 @@ describe('buildTimerEmbedMessage', () => {
     expect(embed).toBeInstanceOf(EmbedBuilder);
     const json = (embed as EmbedBuilder).toJSON();
 
-    expect(json.title).toBe('🍅 ポモドーロタイマー');
+    expect(json.title).toBe('Timer');
     expect(json.color).toBe(0x3498db); // work=青
 
     // 円形画像を attachment:// で参照。
