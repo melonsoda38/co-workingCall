@@ -209,6 +209,9 @@ export class EmbedManager {
     this.#currentPhase = 'countdown';
     this.#logger.info('countdown 突入: 終了予告音を再生し 5秒更新を停止');
     this.#soundNotifier?.playCountdownWarning();
+    // 「ご参加ありがとう」投稿は countdown 突入時 (終了予告音の直後) に削除する。
+    // onEnded / onIdle の削除はこれより手前で抜ける経路 (空 VC 早期退出・/pomo stop) 用の保険。
+    await this.#deleteWelcomeMessage();
     this.#debouncer.cancel();
     this.#updater?.stop();
     if (this.#timerEmbedId !== null) {
@@ -265,9 +268,9 @@ export class EmbedManager {
           this.#logger.warn({ err }, 'bot の VC 退出に失敗 (best-effort)');
         }
       }
-      // 7. お疲れさま投稿 + ご参加ありがとう投稿を削除 (新スタート Embed 投稿前に
-      //    テキスト欄を整える)。Embed なしのプレーンテキストは purgeOwnEmbeds の
-      //    対象外なので明示削除する。削除失敗は best-effort (warn のみ・後段継続)。
+      // 7. お疲れさま投稿を削除 (新スタート Embed 投稿前にテキスト欄を整える)。
+      //    Embed なしのプレーンテキストは purgeOwnEmbeds の対象外なので明示削除する。
+      //    削除失敗は best-effort (warn のみ・後段継続)。
       try {
         await this.#channel.delete(farewell.id);
         this.#logger.info({ messageId: farewell.id }, 'お疲れさま投稿を削除');
@@ -277,6 +280,8 @@ export class EmbedManager {
           'お疲れさま投稿の削除に失敗 (best-effort)',
         );
       }
+      // ご参加ありがとう投稿は通常 countdown 突入時に削除済み。countdown を経ず
+      // ここへ来る経路 (空 VC 早期退出) の保険として再度削除を試みる (済みなら no-op)。
       await this.#deleteWelcomeMessage();
       // 8. SessionState 相当のリセット。
       //    PomodoroTimer は ended 到達で interval は停止するが #startedAt/#currentPhase='ended' を

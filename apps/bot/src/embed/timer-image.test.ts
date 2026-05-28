@@ -75,9 +75,9 @@ describe('centerText (分刻み)', () => {
     });
   });
 
-  it('countdown は「まもなく」', () => {
+  it('countdown は「まもなく / 終了」の 2 行 (改行入り)', () => {
     expect(centerText(snap({ phase: 'countdown', remainingMs: 5_000 }))).toEqual({
-      main: 'まもなく',
+      main: 'まもなく\n終了',
       unit: '',
     });
   });

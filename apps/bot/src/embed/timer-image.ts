@@ -65,7 +65,10 @@ export function progressRatio(snapshot: TimerSnapshot, config: BotConfig): numbe
   return Math.min(1, Math.max(0, ratio));
 }
 
-/** 円の中央に出す主テキスト (分刻み)。countdown は「まもなく」。 */
+/**
+ * 円の中央に出す主テキスト (分刻み)。countdown は「まもなく / 終了」の 2 行
+ * (main に改行 \n を含む。renderTimerImage 側で行ごとに描画する)。
+ */
 export function centerText(snapshot: TimerSnapshot): { main: string; unit: string } {
   switch (snapshot.phase) {
     case 'work':
@@ -76,7 +79,7 @@ export function centerText(snapshot: TimerSnapshot): { main: string; unit: strin
       return { main: String(minutes), unit: '分' };
     }
     case 'countdown':
-      return { main: 'まもなく', unit: '' };
+      return { main: 'まもなく\n終了', unit: '' };
     case 'idle':
     case 'ended':
       return { main: '-', unit: '' };
@@ -167,12 +170,24 @@ export function renderTimerImage(snapshot: TimerSnapshot, config: BotConfig): Bu
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
-  // 中央: 残り時間 (大) + 単位 (小)。
+  // 中央: 残り時間 (大) + 単位 (小)。main は改行 (\n) を含み得る (countdown の「まもなく/終了」)。
   const { main, unit } = centerText(snapshot);
-  const mainIsLong = main.length >= 3; // 「まもなく」など長い文字列はフォントを小さく。
+  const mainLines = main.split('\n');
+  const mainIsLong = mainLines.some((line) => line.length >= 3); // 長い文字列はフォントを小さく。
+  const fontPx = mainIsLong ? 36 : 56;
   ctx.fillStyle = '#ffffff';
-  ctx.font = `bold ${String(mainIsLong ? 36 : 56)}px "${TIMER_IMAGE_FONT}"`;
-  ctx.fillText(main, cx, cy - 16);
+  ctx.font = `bold ${String(fontPx)}px "${TIMER_IMAGE_FONT}"`;
+  if (mainLines.length === 1) {
+    // 単一行: 下に単位を置く前提で少し上寄せ。
+    ctx.fillText(main, cx, cy - 16);
+  } else {
+    // 複数行 (countdown): 円の中央に行ブロックを縦中央寄せ。
+    const lineHeight = fontPx + 6;
+    const top = cy - ((mainLines.length - 1) * lineHeight) / 2;
+    mainLines.forEach((line, i) => {
+      ctx.fillText(line, cx, top + i * lineHeight);
+    });
+  }
   if (unit) {
     ctx.font = `20px "${TIMER_IMAGE_FONT}"`;
     ctx.fillText(unit, cx, cy + 24);
