@@ -15,7 +15,7 @@ export const TIMER_IMAGE_NAME = 'timer.png';
 /**
  * Embed 本文と添付画像 (新規投稿・edit 共通の中身)。
  * レイアウト (embed-spec §2):
- * - title: "🍅 ポモドーロタイマー" (固定。直下に余白は入れない)
+ * - title: "Timer" (固定。直下に余白は入れない)
  * - color: フェーズ別 (左バー。phaseColorHex を 16進→数値化)
  * - image: 円形タイマー画像 (中央に残り分/フェーズ/セット、外周に進捗リング)。
  *   時刻・フェーズ・セットは全て画像に集約 (text field では出さない)。
@@ -31,7 +31,7 @@ export function buildTimerEmbedContent(
   const attachment = new AttachmentBuilder(png, { name: TIMER_IMAGE_NAME });
 
   const embed = new EmbedBuilder()
-    .setTitle('🍅 ポモドーロタイマー')
+    .setTitle('Timer')
     .setColor(Number.parseInt(phaseColorHex(snapshot.phase).slice(1), 16))
     .setImage(`attachment://${TIMER_IMAGE_NAME}`)
     .setFooter({ text: formatConfigSummary(config) });

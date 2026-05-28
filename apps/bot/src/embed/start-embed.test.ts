@@ -34,7 +34,7 @@ describe('buildStartEmbedMessage', () => {
     const embed = msg.embeds?.[0];
     expect(embed).toBeInstanceOf(EmbedBuilder);
     const json = (embed as EmbedBuilder).toJSON();
-    expect(json.title).toBe('🍅 ポモドーロタイマー');
+    expect(json.title).toBe('Timer');
     expect(json.description).toBe('ボタンを押して作業を始めましょう');
     expect(json.fields?.[0]).toMatchObject({
       name: '現在の設定',

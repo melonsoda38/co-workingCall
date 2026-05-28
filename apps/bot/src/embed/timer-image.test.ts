@@ -88,17 +88,18 @@ describe('phaseTextPlain', () => {
     expect(phaseTextPlain(snap({ phase: 'work' }))).toBe('作業中');
     expect(phaseTextPlain(snap({ phase: 'break' }))).toBe('休憩中');
     expect(phaseTextPlain(snap({ phase: 'finalBreak' }))).toBe('最終休憩');
-    expect(phaseTextPlain(snap({ phase: 'countdown' }))).toBe('もうすぐ終了');
+    // countdown は中央の「まもなく」だけ。下段は空。
+    expect(phaseTextPlain(snap({ phase: 'countdown' }))).toBe('');
     expect(phaseTextPlain(snap({ phase: 'idle' }))).toBe('');
   });
 });
 
 describe('setText', () => {
-  it('work/break は N/M、countdown は「最終」、finalBreak・その他は空', () => {
+  it('work/break は N/M、finalBreak・countdown・その他は空', () => {
     expect(setText(snap({ phase: 'work', currentSet: 2, totalSets: 4 }))).toBe('2/4');
     expect(setText(snap({ phase: 'break', currentSet: 3, totalSets: 4 }))).toBe('3/4');
     expect(setText(snap({ phase: 'finalBreak' }))).toBe('');
-    expect(setText(snap({ phase: 'countdown' }))).toBe('最終');
+    expect(setText(snap({ phase: 'countdown' }))).toBe('');
     expect(setText(snap({ phase: 'idle' }))).toBe('');
   });
 });
