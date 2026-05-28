@@ -614,6 +614,23 @@ describe('EmbedManager 歓迎投稿 (welcome message)', () => {
     expect(welcomePostCount).toBe(1);
   });
 
+  it('countdown 突入 (終了予告音の直後) で歓迎投稿が削除される', async () => {
+    const { channel, del } = fakeChannel();
+    const timer = new FakeTimer();
+    const m = new EmbedManager({ channel, timer, config, logger });
+
+    timer.emit('phaseChange', makeSnapshot('work'));
+    await vi.advanceTimersByTimeAsync(0);
+    const welcomeId = m.welcomeMessageId;
+    expect(welcomeId).not.toBeNull();
+
+    timer.emit('countdown', makeSnapshot('countdown'));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(del.mock.calls.map((c) => c[0])).toContain(welcomeId);
+    expect(m.welcomeMessageId).toBeNull();
+  });
+
   it('onEnded で歓迎投稿が削除され welcomeMessageId は null に戻る', async () => {
     const { channel, del } = fakeChannel();
     const timer = new FakeTimer();

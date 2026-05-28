@@ -27,10 +27,10 @@
 #### 円形タイマー画像 (timer-image.ts / @napi-rs/canvas)
 256x256 PNG をその場で生成し、Embed に attachment:// で添付する。
 - 中央 (大): 残り時間 (分)。`Math.ceil(remainingMs / 60000)` + "分"。countdown は
-  「まもなく」。
+  「まもなく / 終了」の 2 行 (改行入り)。
 - 中央 (下): フェーズ名 + セット。"作業中 2/4" / "休憩中 3/4" / "最終休憩"
   (finalBreak はセット表記なし。canvas はカラー絵文字を描けないので絵文字なしの平文)。
-  countdown は中央の「まもなく」のみで下段なし。
+  countdown は下段なし (中央の「まもなく / 終了」のみ)。
 - 外周リング: フェーズ内進捗 (経過割合)。色はフェーズ別。countdown は満杯。
   - 注意: skia 系 canvas は `arc(s, s+2π)` (起点ずらしの全周) が描画されないため、
     全周 (ratio>=1) は `arc(0, 2π)` で描く。
@@ -83,7 +83,11 @@
   (タイマー開始時、参加者への歓迎)
 
 これらは Embed ではないため purgeOwnEmbeds の対象外。EmbedManager が messageId を
-追跡し、終了演出 (onEnded) と onIdle (`/pomo stop`) の双方で明示的に削除する。
+追跡し明示的に削除する。
+- 「お疲れさまでした」: 終了演出 (onEnded) で削除。
+- 「ご参加ありがとう」: countdown 突入時 (終了予告音 countdown_warning.mp3 の再生直後)
+  に削除する。countdown を経ずに抜ける経路 (空 VC 早期退出の onEnded・`/pomo stop`
+  の onIdle) では保険として再度削除を試みる (済みなら no-op)。
 
 ## VCテキスト欄は常に Embed 1 つに保つ
 新規 Embed 投稿の**直前**に、対象 VC 内蔵テキスト欄から bot 自身が投稿した
