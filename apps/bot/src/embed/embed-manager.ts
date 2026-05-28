@@ -19,6 +19,9 @@ import {
  */
 export const ENDING_DELAY_MS = 3_000;
 
+/** お疲れさま投稿を削除するまでの遅延 (投稿から 30 秒)。 */
+export const FAREWELL_DELETE_DELAY_MS = 30_000;
+
 /**
  * 終了演出 (US-19) で EmbedManager が呼ぶ外部操作 (VC 系の責務)。
  * 注入により EmbedManager を Discord 非依存に保つ。未注入なら no-op。
@@ -119,6 +122,8 @@ export class EmbedManager {
    * 明示的に delete する。
    */
   #welcomeMessageId: string | null = null;
+  /** お疲れさま投稿の遅延削除 (投稿30秒後) 用タイマー。 */
+  #farewellDeleteTimer: NodeJS.Timeout | null = null;
   #updater: TimerEmbedUpdater | null = null;
   /** 終了演出の二重発火防止 (ended イベントと空 VC 退出など複数経路から起動し得る)。 */
   #isEnding = false;
@@ -246,9 +251,11 @@ export class EmbedManager {
       // 2. タイマー Embed 削除。
       await this.#deleteTimerEmbed();
       // 3. お疲れさま投稿 (通常通知・SuppressNotifications なし)。
-      //    Embed なしの単発テキストで、後でこの id を消すため戻り値を保持する。
+      //    Embed なしの単発テキストで、投稿から 30 秒後に削除する (新スタート Embed と
+      //    しばらく併存させる)。削除は終了演出フローをブロックしないよう setTimeout で予約。
       const farewell = await this.#channel.post(buildFarewellMessage());
       this.#logger.info({ messageId: farewell.id }, 'お疲れさま投稿 完了');
+      this.#scheduleFarewellDeletion(farewell.id);
       // 4. finish.mp3 を最後まで聞かせる余韻待機。
       this.#logger.info({ ms: ENDING_DELAY_MS }, '余韻待機');
       await this.#endingDelay(ENDING_DELAY_MS);
@@ -268,18 +275,7 @@ export class EmbedManager {
           this.#logger.warn({ err }, 'bot の VC 退出に失敗 (best-effort)');
         }
       }
-      // 7. お疲れさま投稿を削除 (新スタート Embed 投稿前にテキスト欄を整える)。
-      //    Embed なしのプレーンテキストは purgeOwnEmbeds の対象外なので明示削除する。
-      //    削除失敗は best-effort (warn のみ・後段継続)。
-      try {
-        await this.#channel.delete(farewell.id);
-        this.#logger.info({ messageId: farewell.id }, 'お疲れさま投稿を削除');
-      } catch (err) {
-        this.#logger.warn(
-          { err, messageId: farewell.id },
-          'お疲れさま投稿の削除に失敗 (best-effort)',
-        );
-      }
+      // 7. お疲れさま投稿の削除は step 3 で予約済み (投稿30秒後)。ここでは行わない。
       // ご参加ありがとう投稿は通常 countdown 突入時に削除済み。countdown を経ず
       // ここへ来る経路 (空 VC 早期退出) の保険として再度削除を試みる (済みなら no-op)。
       await this.#deleteWelcomeMessage();
@@ -426,6 +422,29 @@ export class EmbedManager {
     } catch (err) {
       this.#logger.warn({ err, messageId }, 'Embed 削除に失敗 (best-effort)');
     }
+  }
+
+  /**
+   * お疲れさま投稿を投稿から FAREWELL_DELETE_DELAY_MS (30秒) 後に削除する (best-effort)。
+   * 終了演出フローはブロックせず setTimeout で予約する。削除失敗は warn のみ。
+   * 二重 ended は #isEnding で防いでいるため通常は同時に 1 つだけだが、念のため
+   * 直前の予約が残っていれば破棄して上書きする。
+   */
+  #scheduleFarewellDeletion(messageId: string): void {
+    if (this.#farewellDeleteTimer !== null) {
+      clearTimeout(this.#farewellDeleteTimer);
+    }
+    this.#farewellDeleteTimer = setTimeout(() => {
+      this.#farewellDeleteTimer = null;
+      void this.#channel
+        .delete(messageId)
+        .then(() => {
+          this.#logger.info({ messageId }, 'お疲れさま投稿を削除 (投稿30秒後)');
+        })
+        .catch((err: unknown) => {
+          this.#logger.warn({ err, messageId }, 'お疲れさま投稿の削除に失敗 (best-effort)');
+        });
+    }, FAREWELL_DELETE_DELAY_MS);
   }
 
   /**
