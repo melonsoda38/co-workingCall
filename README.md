@@ -5,13 +5,29 @@ Discord ボイスチャンネル上で動作するポモドーロタイマー bo
 
 ## 主な機能
 
-- VC 内蔵テキスト欄のスタート Embed からタイマー開始
+### タイマー
+
+- VC 内蔵テキスト欄のスタート Embed から ▶開始 ボタンでタイマー開始 (VC 参加者なら誰でも実行可)
+- スタート Embed の 設定 ボタンで作業/休憩/セット数/最終休憩を変更・`config.json` へ永続化 (各項目 1〜999 分、既定 50/10/2/15 分)
+- タイマー Embed は円形画像 UI で残り分・フェーズ・セット進捗を表示 (work=青 / break=緑 / finalBreak=灰、外周に進捗リング)
 - フェーズ切替時の通知音 (work_end / break_end / final_start)
 - 最終休憩残り 10 秒で終了予告音 (countdown_warning)
-- 終了時の終了演出 (finish.mp3 + お疲れさま投稿 + 3 秒余韻 + VC 全員強制退出 + bot 退出 + 新スタート Embed → idle)
-- VC 自動入退室 (人間ゼロ 1 分で退出。タイマー実行中なら終了演出を発動)
-- ロール単位のコマンド実行制限 + `/pomo admin-role` で許可ロールを追加管理
-- VC テキスト欄に bot 自身の Embed は常に 1 つだけ保つ (新規投稿時に古い Embed を自動掃除)
+- 終了演出 (finish.mp3 + お疲れさま投稿 + 3 秒余韻 + VC 全員強制退出 + bot 退出 → idle。お疲れさま投稿の 15 秒後にお疲れさま削除 + 新スタート Embed 投稿)
+
+### Embed・メッセージのライフサイクル
+
+- VC テキスト欄に bot 自身の Embed は常に 1 つだけ保つ (新規投稿時に過去 Embed を自動掃除)
+- 人間がメッセージを投稿するとタイマー Embed を削除して最下部に再投稿 (60 秒 debounce / 180 秒 maxWait でレート制限)
+- タイマー開始時に「ご参加ありがとう」テキストを投稿、countdown 突入時 (終了予告音と同時) に自動削除
+- スラッシュコマンド・ボタンの ephemeral 応答は 14 分後に自動削除 (interaction token 期限内)
+
+### VC・コマンド
+
+- VC 自動入退室 (人間入室で bot 入室、人間ゼロ 30 秒で退出。タイマー実行中なら退出ではなく終了演出を発動)
+- `/pomo init` で初期化 (`config.json` 生成 + bot を対象 VC に入室)
+- `/pomo stop` でタイマーを強制停止してスタート Embed に戻す (設定は保持、テスト用)
+- `/pomo admin-role add/remove/list` で実行許可ロールを管理
+- `/pomo` 系コマンドはロールベースの実行制限 (「サーバー管理」権限 + 許可ロール所持の二重ガード)
 
 仕様の詳細は [docs/](docs/) 配下の各 spec を参照。
 
@@ -62,7 +78,7 @@ pnpm -r build
 pnpm start
 ```
 
-初回は Discord 上で `/pomo init` を VC 内テキスト欄から実行し、`config.json` を生成する必要がある。`/pomo init` は「サーバー管理」権限を持つメンバーから実行可能 (詳細は [docs/commands-spec.md](docs/commands-spec.md))。
+初回は Discord 上で `/pomo init` を VC 内テキスト欄から実行し、`config.json` を生成する必要がある。`/pomo init` の実行には Discord の「サーバー管理」権限に加え、`pomo-admin` ロール (既定) または `/pomo admin-role add` で追加した許可ロールが必要 (詳細は [docs/commands-spec.md](docs/commands-spec.md))。
 
 ## 開発用スクリプト
 
