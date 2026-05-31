@@ -2,6 +2,7 @@ import { loadConfig } from './config/index.js';
 import { startBot } from './discord/client.js';
 import { parseEnv, type Env } from './env.js';
 import { createLogger } from './logger.js';
+import { acquireSingleInstance, DEFAULT_PID_FILE_PATH } from './single-instance.js';
 
 /**
  * エントリポイント。env 検証 → logger → Discord ログイン → config 読込 → 待機。
@@ -23,6 +24,24 @@ async function main(): Promise<void> {
 
   const logger = createLogger(env.LOG_LEVEL);
   logger.info('co-workingCall bot 起動中');
+
+  // 多重起動防止 (pidfile)。同じトークンの bot が並走すると Discord Gateway 上で
+  // 同じ voiceStateUpdate / interaction を両プロセスが処理し、Embed 投稿が
+  // 重複する事故を起こすため起動時に弾く。
+  const lock = acquireSingleInstance({ pidFilePath: DEFAULT_PID_FILE_PATH, logger });
+  if (!lock.acquired) {
+    process.exitCode = 1;
+    return;
+  }
+  process.on('exit', lock.release);
+  process.once('SIGTERM', () => {
+    lock.release();
+    process.exit(0);
+  });
+  process.once('SIGINT', () => {
+    lock.release();
+    process.exit(0);
+  });
 
   try {
     await startBot(env.DISCORD_TOKEN, logger, env.CONFIG_PATH);
