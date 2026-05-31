@@ -66,8 +66,8 @@ sudo apt install -y libsodium-dev ffmpeg
 ### 1. リポジトリのクローン
 ```
 cd ~
-git clone https://github.com/<your-account>/co-workingCall-bot.git
-cd co-workingCall-bot
+git clone https://github.com/<your-account>/co-workingCall.git
+cd co-workingCall
 pnpm install
 ```
 
@@ -85,7 +85,32 @@ CONFIG_PATH=./config.json
 LOG_LEVEL=info
 ```
 
-### 3. 動作確認
+### 3. 音源ファイルの配置
+音源 mp3 5 ファイルはリポジトリに含まれない (`.gitignore` 対象。公開リポジトリでの再配布禁止のため)。
+別途用意した以下 5 ファイルを `apps/bot/assets/sounds/` に手動配置する:
+
+- `work_end.mp3`
+- `break_end.mp3`
+- `final_start.mp3`
+- `countdown_warning.mp3`
+- `finish.mp3`
+
+メインPCから Pi へ scp で配置する例:
+```
+scp work_end.mp3 break_end.mp3 final_start.mp3 countdown_warning.mp3 finish.mp3 \
+  ユーザー名@pomodoro-bot.local:~/co-workingCall/apps/bot/assets/sounds/
+```
+
+配置しなくても bot は起動するが、フェーズ切替音・終了予告音・終了音が一切鳴らない
+(ログには `音源ファイルが見つからないため再生をスキップします` の warn が記録される)。
+ライセンス・クレジット要件は [apps/bot/assets/sounds/LICENSE.md](../apps/bot/assets/sounds/LICENSE.md) を参照。
+
+### 4. ビルド
+```
+pnpm -r build
+```
+
+### 5. 動作確認
 ```
 ./scripts/start-bot.sh
 ```
@@ -94,8 +119,9 @@ nvm の終了コードに依存しない)、Node が 22 未満なら明確なエ
 `corepack pnpm --filter bot start` を実行する堅牢なランチャ。
 エラーなく bot が Discord にログインできるか確認し、Ctrl+C で停止。
 
-### 4. /pomo init で初期化
-Discord内のVCで `/pomo init` を実行 (pomo-admin ロール必要)。
+### 6. /pomo init で初期化
+Discord 上で対象 VC を開き、**VC の内蔵テキスト欄**で `/pomo init` を実行
+(Discord の「サーバー管理」権限 + `pomo-admin` ロールが必要)。
 config.json が自動生成される。
 
 ## systemd ユーザーサービス化
@@ -114,10 +140,10 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/co-workingCall-bot
+WorkingDirectory=%h/co-workingCall
 # Node のフルバージョンパスを直接書かない (nvm の patch 更新で壊れるため)。
 # ランチャが nvm ロード + Node 22 選択 + バージョン検証まで行う。
-ExecStart=%h/co-workingCall-bot/scripts/start-bot.sh
+ExecStart=%h/co-workingCall/scripts/start-bot.sh
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
@@ -168,9 +194,10 @@ systemctl --user restart pomodoro-bot.service
 
 ### コード更新
 ```
-cd ~/co-workingCall-bot
+cd ~/co-workingCall
 git pull
 pnpm install
+pnpm -r build
 systemctl --user restart pomodoro-bot.service
 ```
 
@@ -178,11 +205,17 @@ systemctl --user restart pomodoro-bot.service
 
 ### bot が Discord にログインできない
 - `.env` の DISCORD_TOKEN を確認
-- Discord Developer Portal で intents が有効か確認
-  (MESSAGE CONTENT INTENT 必須)
+- Discord Developer Portal の Privileged Intent は **不要** 。
+  本 bot は通常 intent の `Guilds` / `GuildMessages` / `GuildVoiceStates` のみで動作し、
+  メッセージ本文は読まないため `Message Content Intent` は要らない
+  (有効化していても動作はする)
 
-### VCに入室できない
-- bot の招待権限を確認 (View Channels, Connect, Speak 等)
+### VCに入室できない / 終了時に全員退出できない
+- bot の招待権限を確認。以下 7 つの権限が必要:
+  - View Channels / Send Messages / Manage Messages / Connect / Speak / **Move Members** / Embed Links
+  - 特に **Move Members は終了時の VC 全員強制退出に必須**。
+    欠けていると warn ログのみで黙って失敗する (best-effort のためタイマー自体は終了する)
+  - `/pomo init` 実行時に不足があれば ephemeral でエラー表示される
 - @discordjs/voice の依存 (libsodium, ffmpeg) のインストール確認
 
 ### サービスが起動しない
