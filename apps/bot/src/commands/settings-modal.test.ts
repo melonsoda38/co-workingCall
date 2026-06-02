@@ -9,6 +9,7 @@ import type { VoiceSession } from '../voice/session-registry.js';
 import {
   SETTINGS_MODAL_ID,
   buildSettingsModal,
+  handleSettingsButton,
   handleSettingsModalSubmit,
   parseSettingsModalInput,
   WORK_MIN_ID,
@@ -262,5 +263,79 @@ describe('handleSettingsModalSubmit (Start Embed 投稿し直し結線)', () => 
     });
     // logger.warn が呼ばれている (引数の詳細までは緩く検証)。
     expect(logger.warn).toHaveBeenCalled();
+  });
+});
+
+describe('handleSettingsButton (Start Embed 取り込み結線)', () => {
+  const logger = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  } as unknown as Logger;
+
+  let dir: string;
+  let configPath: string;
+  const initialConfig: BotConfig = {
+    default: { workSec: 1500, breakSec: 300, sets: 4, finalBreakSec: 900 },
+    guildId: 'g',
+    voiceChannelId: 'vc',
+    adminRoleName: 'pomo-admin',
+    adminRoleNames: [],
+  };
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'cowork-settings-btn-'));
+    configPath = join(dir, 'config.json');
+    await writeFile(configPath, JSON.stringify(initialConfig), 'utf-8');
+    vi.clearAllMocks();
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  function makeButtonInteraction(messageId: string) {
+    const showModal = vi.fn<(modal: ModalBuilder) => Promise<void>>(() => Promise.resolve());
+    return {
+      message: { id: messageId },
+      showModal,
+    };
+  }
+
+  function makeSession() {
+    const adoptStartEmbed = vi.fn<(id: string) => void>();
+    const session = {
+      embedManager: { adoptStartEmbed },
+    } as unknown as VoiceSession;
+    return { session, adoptStartEmbed };
+  }
+
+  it('押下された Start Embed の id を adoptStartEmbed で取り込む (#startEmbedId 不整合の修正)', async () => {
+    const interaction = makeButtonInteraction('start-embed-msg-id');
+    const { session, adoptStartEmbed } = makeSession();
+
+    await handleSettingsButton(
+      interaction as unknown as Parameters<typeof handleSettingsButton>[0],
+      session,
+      configPath,
+      logger,
+    );
+
+    expect(adoptStartEmbed).toHaveBeenCalledWith('start-embed-msg-id');
+    expect(interaction.showModal).toHaveBeenCalledTimes(1);
+  });
+
+  it('session 未注入 (READY 前) でも例外を出さずモーダル表示を試みる', async () => {
+    const interaction = makeButtonInteraction('start-embed-msg-id');
+
+    await handleSettingsButton(
+      interaction as unknown as Parameters<typeof handleSettingsButton>[0],
+      undefined,
+      configPath,
+      logger,
+    );
+
+    expect(interaction.showModal).toHaveBeenCalledTimes(1);
+    expect(logger.error).not.toHaveBeenCalled();
   });
 });

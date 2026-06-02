@@ -100,13 +100,22 @@ export function parseSettingsModalInput(raw: {
   return { ok: true, timer: parsed.data };
 }
 
-/** 設定ボタン (pomo_settings_open) 押下: 現設定を入れたモーダルを表示。 */
+/**
+ * 設定ボタン (pomo_settings_open) 押下: 現設定を入れたモーダルを表示。
+ *
+ * 押下された Start Embed の id を EmbedManager に取り込む (▶開始ボタンと同じ pattern)。
+ * これをやらないと、bot 再起動後など #startEmbedId が null の状態でモーダル保存しても
+ * repostStartEmbed が早期 return し、設定変更後の Start Embed 再投稿が動かない
+ * (start-button.ts:72 と対称形)。
+ */
 export async function handleSettingsButton(
   interaction: ButtonInteraction,
+  session: VoiceSession | undefined,
   configPath: string,
   logger: Logger,
 ): Promise<void> {
   try {
+    session?.embedManager.adoptStartEmbed(interaction.message.id);
     const existing = await loadConfig(configPath);
     const timer = existing.status === 'ok' ? existing.config.default : DEFAULT_TIMER;
     await interaction.showModal(buildSettingsModal(timer));
