@@ -85,7 +85,8 @@ export async function startBot(token: string, logger: Logger, configPath: string
       return;
     }
     if (interaction.isButton() && interaction.customId === SETTINGS_BUTTON_ID) {
-      void handleSettingsButton(interaction, configPath, logger);
+      const session = interaction.guildId ? sessions.get(interaction.guildId) : undefined;
+      void handleSettingsButton(interaction, session, configPath, logger);
       return;
     }
     if (interaction.isModalSubmit() && interaction.customId === SETTINGS_MODAL_ID) {
