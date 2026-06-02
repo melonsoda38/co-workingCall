@@ -58,8 +58,15 @@ corepack enable
 
 ### 5. 必須システムパッケージ
 ```
-sudo apt install -y libsodium-dev ffmpeg
+sudo apt install -y libsodium-dev ffmpeg fonts-noto-cjk
 ```
+
+- `libsodium-dev` / `ffmpeg`: `@discordjs/voice` の音声処理に必要
+- `fonts-noto-cjk`: タイマー Embed の円形画像で日本語を描画するために必要。
+  未インストールだと `@napi-rs/canvas` が `sans-serif` (DejaVu Sans) にフォールバックし、
+  「作業中」「休憩中」「まもなく」「終了」「分」等の日本語が豆腐 (□) になる。
+  インストール後は bot を再起動して `GlobalFonts.has('Noto Sans CJK JP')` の判定を
+  更新する必要がある (`timer-image.ts` でモジュール読み込み時に一度だけ判定するため)。
 
 ## プロジェクトのデプロイ
 
