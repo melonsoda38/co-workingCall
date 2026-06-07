@@ -21,6 +21,14 @@ export function hasAnyAdminRole(
   return memberRoleNames.some((name) => allowedRoleNames.includes(name));
 }
 
+/**
+ * ▶開始 / 設定ボタン操作の権限不足時に表示する共通エラー文言。
+ * /pomo コマンドと同じ許可ロール集合 (buildAllowedRoleNames) を使う前提。
+ */
+export function buttonRoleRequiredMessage(allowedRoleNames: readonly string[]): string {
+  return `この操作には ${allowedRoleNames.join(' / ')} のいずれかのロールが必要です`;
+}
+
 /** bot に必要な VC 権限 (CLAUDE.me セキュリティ節)。 */
 export const REQUIRED_BOT_PERMISSIONS: readonly bigint[] = [
   PermissionFlagsBits.ViewChannel,

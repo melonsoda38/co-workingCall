@@ -2,6 +2,7 @@ import { ButtonInteraction, MessageFlags } from 'discord.js';
 import type { Logger } from 'pino';
 import { loadConfig } from '../config/index.js';
 import type { VoiceSession } from '../voice/session-registry.js';
+import { buildAllowedRoleNames, buttonRoleRequiredMessage, hasAnyAdminRole } from './checks.js';
 import { scheduleEphemeralAutoDelete } from './ephemeral.js';
 
 /** 実行者が対象 VC にいるかの純判定 (commands-spec: ▶開始の前提条件)。 */
@@ -45,6 +46,20 @@ export async function handleStartButton(
     }
 
     const member = await guild.members.fetch(interaction.user.id);
+
+    // タイマー開始は /pomo と同じ許可ロール保持者に限定する。
+    // Discord はボタンをロール別に非表示にできないため、押下時に弾く方式。
+    // 許可ロールは session.config を使う (/pomo admin-role 変更は session に即反映される)。
+    const allowedRoles = buildAllowedRoleNames(
+      session.config.adminRoleName,
+      session.config.adminRoleNames,
+    );
+    const roleNames = member.roles.cache.map((role) => role.name);
+    if (!hasAnyAdminRole(roleNames, allowedRoles)) {
+      await replyEphemeral(buttonRoleRequiredMessage(allowedRoles));
+      return;
+    }
+
     if (!isExecutorInTargetVc(member.voice.channelId, session.config.voiceChannelId)) {
       await replyEphemeral('VCに参加してから押してください');
       return;

@@ -294,11 +294,18 @@ describe('handleSettingsButton (Start Embed 取り込み結線)', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  function makeButtonInteraction(messageId: string) {
+  function makeButtonInteraction(messageId: string, memberRoles: string[] = ['pomo-admin']) {
     const showModal = vi.fn<(modal: ModalBuilder) => Promise<void>>(() => Promise.resolve());
+    const reply = vi.fn<() => Promise<void>>(() => Promise.resolve());
+    const fetch = vi.fn(() =>
+      Promise.resolve({ roles: { cache: memberRoles.map((name) => ({ name })) } }),
+    );
     return {
       message: { id: messageId },
+      user: { id: 'user-1' },
+      guild: { id: 'g', members: { fetch } },
       showModal,
+      reply,
     };
   }
 
@@ -310,7 +317,7 @@ describe('handleSettingsButton (Start Embed 取り込み結線)', () => {
     return { session, adoptStartEmbed };
   }
 
-  it('押下された Start Embed の id を adoptStartEmbed で取り込む (#startEmbedId 不整合の修正)', async () => {
+  it('許可ロール保持者: 押下された Start Embed の id を adoptStartEmbed で取り込む (#startEmbedId 不整合の修正)', async () => {
     const interaction = makeButtonInteraction('start-embed-msg-id');
     const { session, adoptStartEmbed } = makeSession();
 
@@ -325,7 +332,23 @@ describe('handleSettingsButton (Start Embed 取り込み結線)', () => {
     expect(interaction.showModal).toHaveBeenCalledTimes(1);
   });
 
-  it('session 未注入 (READY 前) でも例外を出さずモーダル表示を試みる', async () => {
+  it('許可ロールを持たない実行者は ephemeral で弾かれ adopt もモーダル表示もしない', async () => {
+    const interaction = makeButtonInteraction('start-embed-msg-id', ['everyone']);
+    const { session, adoptStartEmbed } = makeSession();
+
+    await handleSettingsButton(
+      interaction as unknown as Parameters<typeof handleSettingsButton>[0],
+      session,
+      configPath,
+      logger,
+    );
+
+    expect(interaction.reply).toHaveBeenCalledTimes(1);
+    expect(adoptStartEmbed).not.toHaveBeenCalled();
+    expect(interaction.showModal).not.toHaveBeenCalled();
+  });
+
+  it('session 未注入 (READY 前) でも許可ロール保持者なら例外を出さずモーダル表示を試みる', async () => {
     const interaction = makeButtonInteraction('start-embed-msg-id');
 
     await handleSettingsButton(
