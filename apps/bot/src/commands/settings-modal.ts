@@ -12,6 +12,7 @@ import { TimerConfigSchema, type BotConfig, type TimerConfig } from '@co-working
 import { z } from 'zod';
 import { loadConfig, saveConfig } from '../config/index.js';
 import type { VoiceSession } from '../voice/session-registry.js';
+import { buildAllowedRoleNames, buttonRoleRequiredMessage, hasAnyAdminRole } from './checks.js';
 import { scheduleEphemeralAutoDelete } from './ephemeral.js';
 
 export const SETTINGS_MODAL_ID = 'pomo_settings_modal';
@@ -103,10 +104,14 @@ export function parseSettingsModalInput(raw: {
 /**
  * 設定ボタン (pomo_settings_open) 押下: 現設定を入れたモーダルを表示。
  *
- * 押下された Start Embed の id を EmbedManager に取り込む (▶開始ボタンと同じ pattern)。
+ * 設定変更は /pomo と同じ許可ロール保持者に限定する。Discord はボタンを
+ * ロール別に非表示にできないため、押下時にロールを判定し、権限が無ければ
+ * モーダルを開かず ephemeral で弾く方式 (▶開始ボタンと同じ pattern)。
+ *
+ * 認可後は押下された Start Embed の id を EmbedManager に取り込む。
  * これをやらないと、bot 再起動後など #startEmbedId が null の状態でモーダル保存しても
  * repostStartEmbed が早期 return し、設定変更後の Start Embed 再投稿が動かない
- * (start-button.ts:72 と対称形)。
+ * (start-button.ts と対称形)。
  */
 export async function handleSettingsButton(
   interaction: ButtonInteraction,
@@ -114,10 +119,35 @@ export async function handleSettingsButton(
   configPath: string,
   logger: Logger,
 ): Promise<void> {
+  const replyEphemeral = async (content: string): Promise<void> => {
+    await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+    scheduleEphemeralAutoDelete(interaction, logger);
+  };
+
   try {
-    session?.embedManager.adoptStartEmbed(interaction.message.id);
+    const guild = interaction.guild;
+    if (!guild) {
+      await replyEphemeral('サーバー内で実行してください');
+      return;
+    }
+
+    // 許可ロールは config から決める (session 未注入=READY 前 でも判定できるよう
+    // loadConfig を基準にする)。config 未確定時は基準ロール pomo-admin にフォールバック。
     const existing = await loadConfig(configPath);
-    const timer = existing.status === 'ok' ? existing.config.default : DEFAULT_TIMER;
+    const config = existing.status === 'ok' ? existing.config : undefined;
+    const allowedRoles = buildAllowedRoleNames(
+      config?.adminRoleName ?? 'pomo-admin',
+      config?.adminRoleNames ?? [],
+    );
+    const member = await guild.members.fetch(interaction.user.id);
+    const roleNames = member.roles.cache.map((role) => role.name);
+    if (!hasAnyAdminRole(roleNames, allowedRoles)) {
+      await replyEphemeral(buttonRoleRequiredMessage(allowedRoles));
+      return;
+    }
+
+    session?.embedManager.adoptStartEmbed(interaction.message.id);
+    const timer = config?.default ?? DEFAULT_TIMER;
     await interaction.showModal(buildSettingsModal(timer));
   } catch (err) {
     logger.error({ err }, '設定モーダルの表示に失敗しました');

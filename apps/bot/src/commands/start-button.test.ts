@@ -28,10 +28,20 @@ function snapshot(phase: TimerSnapshot['phase']): TimerSnapshot {
   return { phase, remainingMs: 0, currentSet: 0, totalSets: 0, startedAt: null };
 }
 
-function makeInteraction(opts: { memberVcId: string | null; messageId?: string }) {
+function makeInteraction(opts: {
+  memberVcId: string | null;
+  messageId?: string;
+  memberRoles?: string[];
+}) {
   const reply = vi.fn<() => Promise<void>>(() => Promise.resolve());
   const deferUpdate = vi.fn<() => Promise<void>>(() => Promise.resolve());
-  const fetch = vi.fn(() => Promise.resolve({ voice: { channelId: opts.memberVcId } }));
+  const roleNames = opts.memberRoles ?? ['pomo-admin'];
+  const fetch = vi.fn(() =>
+    Promise.resolve({
+      voice: { channelId: opts.memberVcId },
+      roles: { cache: roleNames.map((name) => ({ name })) },
+    }),
+  );
   const interaction = {
     user: { id: 'user-1' },
     guildId: 'guild-1',
@@ -107,6 +117,32 @@ describe('handleStartButton', () => {
     const { interaction, reply } = makeInteraction({ memberVcId: TARGET_VC });
     await handleStartButton(interaction, undefined, 'cfg.json', logger);
     expect(reply).toHaveBeenCalledTimes(1);
+  });
+
+  it('許可ロールを持たない実行者は ephemeral 応答で弾かれ開始しない', async () => {
+    const { interaction, reply, deferUpdate } = makeInteraction({
+      memberVcId: TARGET_VC,
+      memberRoles: ['everyone'],
+    });
+    const { session, start } = makeSession();
+    await handleStartButton(interaction, session, 'cfg.json', logger);
+    expect(reply).toHaveBeenCalledTimes(1);
+    expect(deferUpdate).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('追加ロール (adminRoleNames) 保持者は開始できる', async () => {
+    const { interaction, deferUpdate, reply } = makeInteraction({
+      memberVcId: TARGET_VC,
+      memberRoles: ['member', 'study-lead'],
+    });
+    const { session, start } = makeSession();
+    // session.config に追加ロールを足す。
+    (session.config as { adminRoleNames: string[] }).adminRoleNames = ['study-lead'];
+    await handleStartButton(interaction, session, 'cfg.json', logger);
+    expect(reply).not.toHaveBeenCalled();
+    expect(deferUpdate).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenCalledWith(DEFAULT_TIMER);
   });
 
   it('実行者が対象 VC にいなければ ephemeral 応答し開始しない', async () => {
