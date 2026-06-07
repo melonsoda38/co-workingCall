@@ -73,8 +73,8 @@ sudo apt install -y libsodium-dev ffmpeg fonts-noto-cjk
 ### 1. リポジトリのクローン
 ```
 cd ~
-git clone https://github.com/<your-account>/co-workingCall.git
-cd co-workingCall
+git clone https://github.com/<your-account>/co-workingCall.git co-workingCall-limited
+cd co-workingCall-limited
 pnpm install
 ```
 
@@ -105,7 +105,7 @@ LOG_LEVEL=info
 メインPCから Pi へ scp で配置する例:
 ```
 scp work_end.mp3 break_end.mp3 final_start.mp3 countdown_warning.mp3 finish.mp3 \
-  ユーザー名@pomodoro-bot.local:~/co-workingCall/apps/bot/assets/sounds/
+  ユーザー名@pomodoro-bot.local:~/co-workingCall-limited/apps/bot/assets/sounds/
 ```
 
 配置しなくても bot は起動するが、フェーズ切替音・終了予告音・終了音が一切鳴らない
@@ -147,10 +147,10 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/co-workingCall
+WorkingDirectory=%h/co-workingCall-limited
 # Node のフルバージョンパスを直接書かない (nvm の patch 更新で壊れるため)。
 # ランチャが nvm ロード + Node 22 選択 + バージョン検証まで行う。
-ExecStart=%h/co-workingCall/scripts/start-bot.sh
+ExecStart=%h/co-workingCall-limited/scripts/start-bot.sh
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
@@ -201,7 +201,7 @@ systemctl --user restart pomodoro-bot.service
 
 ### コード更新
 ```
-cd ~/co-workingCall
+cd ~/co-workingCall-limited
 git pull
 pnpm install
 pnpm -r build
