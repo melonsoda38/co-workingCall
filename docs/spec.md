@@ -91,7 +91,7 @@ remainingMs  : number
 currentSet   : number
 totalSets    : number
 startedAt    : number | null
-continuous   : boolean (任意)   // 「続行」継続ループ中は true。currentSet は継続回数(cycle)
+continuous   : boolean (任意)   // 「続行」継続ループ中は true。currentSet は累計の実施セット数 (元 sets + 継続サイクル)
 ```
 
 ### BotConfig (永続化設定、config.json)

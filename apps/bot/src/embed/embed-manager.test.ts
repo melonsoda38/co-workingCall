@@ -31,7 +31,7 @@ type Ev = 'phaseChange' | 'countdown' | 'ended';
 class FakeTimer implements TimerLike {
   snapshot: TimerSnapshot = makeSnapshot('idle');
   resetCallCount = 0;
-  startContinuousCalls: { workSec: number; breakSec: number }[] = [];
+  startContinuousCalls: { workSec: number; breakSec: number; baseSets: number }[] = [];
   #listeners = new Map<Ev, ((s: TimerSnapshot) => void)[]>();
 
   getSnapshot(): TimerSnapshot {
@@ -58,12 +58,12 @@ class FakeTimer implements TimerLike {
   }
 
   /** 実 PomodoroTimer 同様、開始で work への phaseChange (継続スナップショット) を発火する。 */
-  startContinuous(workSec: number, breakSec: number): void {
-    this.startContinuousCalls.push({ workSec, breakSec });
+  startContinuous(workSec: number, breakSec: number, baseSets: number): void {
+    this.startContinuousCalls.push({ workSec, breakSec, baseSets });
     this.emit('phaseChange', {
       phase: 'work',
       remainingMs: workSec * 1000,
-      currentSet: 1,
+      currentSet: baseSets + 1,
       totalSets: 0,
       startedAt: 0,
       continuous: true,
@@ -943,8 +943,8 @@ describe('EmbedManager 孤児テキスト掃除 / isEnding (監査観察事項1-
       expect(ea.kickAllHumans).not.toHaveBeenCalled();
       expect(ea.disconnectBot).not.toHaveBeenCalled();
       expect(sound.playFinish).not.toHaveBeenCalled();
-      // 開始時の作業/休憩秒で継続開始。
-      expect(timer.startContinuousCalls).toEqual([{ workSec: 1500, breakSec: 300 }]);
+      // 開始時の作業/休憩秒・元セッションの実施セット数 (4) で継続開始。
+      expect(timer.startContinuousCalls).toEqual([{ workSec: 1500, breakSec: 300, baseSets: 4 }]);
       expect(m.continuousActive).toBe(true);
     });
 

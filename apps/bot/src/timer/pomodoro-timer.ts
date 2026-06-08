@@ -29,6 +29,11 @@ export class PomodoroTimer extends EventEmitter {
   #continuous = false;
   #continuousWorkSec = 0;
   #continuousBreakSec = 0;
+  /**
+   * 継続開始までに実施済みの作業セット数 (元セッションの sets)。継続中の表示は
+   * この値に継続サイクル数を足した「累計の実施セット数」を currentSet として返す。
+   */
+  #continuousBaseSets = 0;
 
   /** タイマー開始。動作中なら一旦停止してから開始する。 */
   start(config: TimerConfig): void {
@@ -48,13 +53,16 @@ export class PomodoroTimer extends EventEmitter {
   /**
    * 「続行」継続モードで開始する (US-続行)。開始時の作業/休憩時間で work/break を無限ループし、
    * countdown/ended は発火しない。startedAt は再採番する (継続ループ自体の経過起点)。
+   * baseSets は継続開始までに実施済みの作業セット数 (元セッションの sets) で、継続中の
+   * currentSet は baseSets + 継続サイクル数 (累計の実施セット数) として返す。
    * 23時間キャップはセッション開始時刻基準で EmbedManager が別管理する。
    */
-  startContinuous(workSec: number, breakSec: number): void {
+  startContinuous(workSec: number, breakSec: number, baseSets: number): void {
     this.#stopInterval();
     this.#continuous = true;
     this.#continuousWorkSec = workSec;
     this.#continuousBreakSec = breakSec;
+    this.#continuousBaseSets = baseSets;
     this.#config = null;
     this.#totalSets = 0;
     this.#startedAt = Date.now();
@@ -85,7 +93,8 @@ export class PomodoroTimer extends EventEmitter {
 
   /** 現在の状態スナップショットを返す。 */
   getSnapshot(): TimerSnapshot {
-    // 継続モード: work/break を無限ループし currentSet は継続回数 (cycle)。
+    // 継続モード: work/break を無限ループし、currentSet は「累計の実施セット数」
+    // (元セッションの実施セット数 baseSets + 継続サイクル数 cycle)。
     if (this.#continuous && this.#startedAt !== null) {
       const elapsed = Date.now() - this.#startedAt;
       const { phase, cycle, phaseRemainingMs } = computeContinuousPhase(
@@ -96,7 +105,7 @@ export class PomodoroTimer extends EventEmitter {
       return {
         phase,
         remainingMs: phaseRemainingMs,
-        currentSet: cycle,
+        currentSet: this.#continuousBaseSets + cycle,
         totalSets: 0,
         startedAt: this.#startedAt,
         continuous: true,
