@@ -70,3 +70,33 @@ export function computePhase(elapsedMs: number, config: TimerConfig): PhaseResol
   }
   return { phase: 'ended', currentSet: config.sets, phaseRemainingMs: 0 };
 }
+
+/** computeContinuousPhase の結果。継続モードは work/break のみで終端を持たない。 */
+export interface ContinuousResolution {
+  phase: 'work' | 'break';
+  /** 継続回数 (1 から始まる現在の作業/休憩サイクル番号)。 */
+  cycle: number;
+  /** 現フェーズの残り時間 (ms)。0 以上。 */
+  phaseRemainingMs: number;
+}
+
+/**
+ * 「続行」継続モードの経過時間からフェーズ・継続回数・残りを算出する純粋関数 (US-続行)。
+ * 1 サイクル = work(workSec) + break(breakSec) を無限に繰り返す。finalBreak/countdown/ended は
+ * 持たない (終了は VC 0 人 or 23時間キャップで外部から行う)。負値は 0 として扱う。
+ */
+export function computeContinuousPhase(
+  elapsedMs: number,
+  workSec: number,
+  breakSec: number,
+): ContinuousResolution {
+  const elapsed = elapsedMs < 0 ? 0 : elapsedMs;
+  const workMs = workSec * 1000;
+  const cycleMs = (workSec + breakSec) * 1000;
+  const cycle = Math.floor(elapsed / cycleMs) + 1;
+  const within = elapsed % cycleMs;
+  if (within < workMs) {
+    return { phase: 'work', cycle, phaseRemainingMs: workMs - within };
+  }
+  return { phase: 'break', cycle, phaseRemainingMs: cycleMs - within };
+}

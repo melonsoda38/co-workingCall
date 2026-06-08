@@ -5,3 +5,4 @@ export * from './pomo.js';
 export * from './register.js';
 export * from './settings-modal.js';
 export * from './start-button.js';
+export * from './continue-button.js';

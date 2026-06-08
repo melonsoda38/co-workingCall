@@ -102,6 +102,15 @@ describe('setText', () => {
     expect(setText(snap({ phase: 'countdown' }))).toBe('');
     expect(setText(snap({ phase: 'idle' }))).toBe('');
   });
+
+  it('継続モード (continuous) は work/break で「N回目」を表示する', () => {
+    expect(setText(snap({ phase: 'work', currentSet: 3, totalSets: 0, continuous: true }))).toBe(
+      '3回目',
+    );
+    expect(setText(snap({ phase: 'break', currentSet: 1, totalSets: 0, continuous: true }))).toBe(
+      '1回目',
+    );
+  });
 });
 
 describe('renderTimerImage', () => {

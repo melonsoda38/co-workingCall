@@ -34,13 +34,21 @@ function connectToVc(channel: VoiceChannel, logger: Logger): VoiceConnectionHand
 }
 
 /**
- * VC 内の人間メンバー全員を切断する (ending-spec §強制退出の実装)。
+ * VC 内の人間メンバーを切断する (ending-spec §強制退出の実装)。
+ * except に含まれる ID は残す (「続行」を押したユーザの残留に使う。US-続行)。
  * 順次 await + best-effort (個別失敗は warn ログのみ)。bot 自身は最後に
  * VoiceManager.forceDisconnect で切る (本関数では触らない)。
  */
-async function kickAllHumansFromVc(channel: VoiceChannel, logger: Logger): Promise<void> {
+async function kickHumansFromVc(
+  channel: VoiceChannel,
+  logger: Logger,
+  except?: ReadonlySet<string>,
+): Promise<void> {
   for (const [, member] of channel.members) {
     if (member.user.bot) {
+      continue;
+    }
+    if (except?.has(member.id)) {
       continue;
     }
     try {
@@ -102,7 +110,8 @@ export async function setupVoiceFeature(
   // 実行時 (onEnded 発火時) には voiceManagerRef.current が代入済みで安全。
   const voiceManagerRef: { current: VoiceManager | null } = { current: null };
   const endingActions: EndingActions = {
-    kickAllHumans: () => kickAllHumansFromVc(channel, logger),
+    kickAllHumans: () => kickHumansFromVc(channel, logger),
+    kickHumansExcept: (except) => kickHumansFromVc(channel, logger, except),
     disconnectBot: () => {
       voiceManagerRef.current?.forceDisconnect();
     },

@@ -6,6 +6,7 @@ import { buildTimerEmbedContent, buildTimerEmbedMessage } from './timer-embed.js
 import { RepostDebouncer } from './repost-debouncer.js';
 import { TimerEmbedUpdater } from './timer-embed-updater.js';
 import { buildFarewellMessage, FAREWELL_CONTENT } from './farewell-message.js';
+import { buildTimeoutMessage, TIMEOUT_CONTENT } from './timeout-message.js';
 import { buildWelcomeMessage, WELCOME_CONTENT } from './welcome-message.js';
 import {
   playPhaseTransitionSound,
@@ -23,12 +24,26 @@ export const ENDING_DELAY_MS = 3_000;
 export const FAREWELL_DELETE_DELAY_MS = 15_000;
 
 /**
+ * 「続行」継続セッションの上限 (セッション開始から 23 時間)。US-続行。
+ * 続行でタイマーが翌日まで続き新セッションを開始できなくなるのを防ぐ強制終了キャップ。
+ */
+export const CONTINUE_MAX_SESSION_MS = 23 * 60 * 60 * 1000;
+
+/** onEnded を呼ぶ理由。timeout23h は 23時間キャップ起因 (投稿文言が変わる)。 */
+export type EndingReason = 'normal' | 'timeout23h';
+
+/**
  * 終了演出 (US-19) で EmbedManager が呼ぶ外部操作 (VC 系の責務)。
  * 注入により EmbedManager を Discord 非依存に保つ。未注入なら no-op。
  */
 export interface EndingActions {
   /** VC 内の人間メンバー全員を切断する (順次 await、失敗は best-effort)。 */
   kickAllHumans(): Promise<void>;
+  /**
+   * VC 内の人間メンバーのうち except に含まれない ID だけを切断する (US-続行)。
+   * 「続行」を押したユーザは残し、押していないユーザのみ退出させるために使う。
+   */
+  kickHumansExcept(except: ReadonlySet<string>): Promise<void>;
   /** bot 自身を即時退出させる (VoiceManager.forceDisconnect 相当)。 */
   disconnectBot(): void;
 }
@@ -77,6 +92,11 @@ export interface TimerLike {
    * これを呼ばないと次の ▶開始ボタンで getSnapshot().phase !== 'idle' に弾かれる。
    */
   reset(): void;
+  /**
+   * 「続行」継続モードで開始する (US-続行)。開始時の作業/休憩時間で work/break を
+   * 無限ループし countdown/ended を発火しない。最終休憩終了時の継続移行で呼ぶ。
+   */
+  startContinuous(workSec: number, breakSec: number): void;
 }
 
 export interface EmbedManagerDeps {
@@ -140,6 +160,20 @@ export class EmbedManager {
   #updater: TimerEmbedUpdater | null = null;
   /** 終了演出の二重発火防止 (ended イベントと空 VC 退出など複数経路から起動し得る)。 */
   #isEnding = false;
+  /**
+   * 「続行」が押されたか (最終休憩中に 1 人でも押せば true)。US-続行。
+   * 最終休憩終了 (ended) 時にこれが true なら終了演出をせず継続ループへ移行する。
+   */
+  #continuing = false;
+  /** 継続ループへ移行済みか。移行後の ended (VC 0 人 / 23時間) は実終了させる。 */
+  #continuousActive = false;
+  /** 「続行」を押したユーザ ID 集合。移行時にこの集合以外を強制退出する。 */
+  readonly #continueUserIds = new Set<string>();
+  /** 継続ループで使う作業/休憩秒。セッション開始時 (onTimerStart) に確保する。 */
+  #continueWorkSec = 0;
+  #continueBreakSec = 0;
+  /** セッション開始からの 23時間キャップ用タイマー。 */
+  #cap23hTimer: NodeJS.Timeout | null = null;
 
   constructor(deps: EmbedManagerDeps) {
     this.#channel = deps.channel;
@@ -180,6 +214,10 @@ export class EmbedManager {
   get isEnding(): boolean {
     return this.#isEnding;
   }
+  /** 「続行」継続ループ中か (診断・テスト用)。 */
+  get continuousActive(): boolean {
+    return this.#continuousActive;
+  }
 
   /** idle: スタート用 Embed を投稿 (タイマー用・既存スタート用が残っていれば削除)。 */
   async onIdle(): Promise<void> {
@@ -187,12 +225,14 @@ export class EmbedManager {
     this.#updater = null;
     this.#debouncer.cancel();
     this.#cancelFarewellDeletion();
+    // /pomo stop など onEnded を経由しない経路でも継続状態・23時間キャップを残さない。
+    this.#resetContinueState();
     this.#currentPhase = 'idle';
     await this.#deleteTimerEmbed();
     // /pomo stop など onEnded を経由しない経路でも welcome を残さない。
     await this.#deleteWelcomeMessage();
-    // 歓迎/お疲れさまの孤児プレーンテキスト (id 追跡漏れ・前回 ended の残り) を本文一致で掃除。
-    await this.#channel.purgeOwnTexts([WELCOME_CONTENT, FAREWELL_CONTENT]);
+    // 歓迎/お疲れさま/23時間終了の孤児プレーンテキストを本文一致で掃除。
+    await this.#channel.purgeOwnTexts([WELCOME_CONTENT, FAREWELL_CONTENT, TIMEOUT_CONTENT]);
     // 既存スタート Embed を消してから出し直す (/pomo stop の重複投稿防止・冪等化)。
     await this.#deleteStartEmbed();
     const posted = await this.#postFresh(buildStartEmbedMessage(this.#config));
@@ -205,10 +245,16 @@ export class EmbedManager {
    */
   async onTimerStart(): Promise<void> {
     this.#currentPhase = 'work';
+    // 「続行」継続用に開始時の作業/休憩秒を確保し、23時間キャップを arm する (US-続行)。
+    // config は設定モーダル保存で途中変更され得るため、開始時点の値を別途固定する。
+    this.#resetContinueState();
+    this.#continueWorkSec = this.#config.default.workSec;
+    this.#continueBreakSec = this.#config.default.breakSec;
+    this.#arm23hCap();
     // 前回 ended のお疲れさま (15秒削除待ち) や、再起動で id 追跡を失った孤児の
     // 歓迎/お疲れさまテキストを、新セッションの歓迎投稿前に掃除する。
     this.#cancelFarewellDeletion();
-    await this.#channel.purgeOwnTexts([WELCOME_CONTENT, FAREWELL_CONTENT]);
+    await this.#channel.purgeOwnTexts([WELCOME_CONTENT, FAREWELL_CONTENT, TIMEOUT_CONTENT]);
     await this.#deleteStartEmbed();
     const snapshot = this.#timer.getSnapshot();
     const posted = await this.#postFresh(buildTimerEmbedMessage(snapshot, this.#config));
@@ -226,11 +272,34 @@ export class EmbedManager {
   }
 
   /**
+   * 「続行」ボタン押下を受け付ける (US-続行)。最終休憩表示中 (countdown 抑制中も含む) で
+   * 継続未移行・終了演出中でないときのみ受理し、ユーザを残留対象に登録する。
+   * 受理時は #continuing を立て、最終休憩終了 (ended) で継続ループへ移行する。
+   * @returns 'ok' (受理) / 'closed' (受付終了: 最終休憩以外・移行済み・終了処理中)
+   */
+  registerContinueUser(userId: string): 'ok' | 'closed' {
+    if (this.#currentPhase !== 'finalBreak' || this.#continuousActive || this.#isEnding) {
+      return 'closed';
+    }
+    this.#continuing = true;
+    this.#continueUserIds.add(userId);
+    this.#logger.info({ userId, total: this.#continueUserIds.size }, '続行を受け付け');
+    return 'ok';
+  }
+
+  /**
    * countdown 突入: 終了予告音 (US-18) → 再投稿 OFF・5秒更新停止 → countdown 表示に edit。
    * countdown フェーズは仕様上 1 回のみ突入 (ending-spec §第一段階)。timer 側の
    * 二重発火に備えて currentPhase ガードで countdown_warning.mp3 の二重再生を防ぐ。
    */
   async onCountdownEnter(): Promise<void> {
+    if (this.#continuing) {
+      // 「続行」が押されている: 終了予告音・「まもなく終了」表示を抑制し、最終休憩 Embed と
+      // 続行ボタンを最後の 10 秒も維持する。#currentPhase は 'finalBreak' のまま据え置き、
+      // ended で継続ループへ移行する (#enterContinue)。
+      this.#logger.info('続行受付中のため countdown 演出を抑制');
+      return;
+    }
     if (this.#currentPhase === 'countdown') {
       // 二重発火: 既に countdown 突入処理を実施済みなので no-op。
       return;
@@ -258,28 +327,40 @@ export class EmbedManager {
    *
    * 二重発火防止 (#isEnding): ended イベント + 空 VC 30 秒退出など複数経路から
    * 同時起動し得るため、最初の 1 回のみ通す。エラー時も必ず #isEnding を解除する。
+   *
+   * US-続行: reason='normal' かつ「続行」が押されていて未移行 (#continuing &&
+   * !#continuousActive) なら、終了演出をせず継続ループへ移行する (#enterContinue)。
+   * 継続移行後の ended (VC 0 人 / 23時間キャップ) は実終了させる。reason='timeout23h' は
+   * 投稿文言を 23時間メッセージに切り替え、常に実終了する。
    */
-  async onEnded(): Promise<void> {
+  async onEnded(reason: EndingReason = 'normal'): Promise<void> {
     if (this.#isEnding) {
       this.#logger.debug('ended 二重発火を握りつぶし (#isEnding ガード)');
       return;
     }
     this.#isEnding = true;
-    this.#logger.info('終了演出フロー開始 (ending-spec §第二段階)');
-    this.#updater?.stop();
-    this.#updater = null;
-    this.#debouncer.cancel();
     try {
+      // 「続行」が押されていて未移行なら継続ループへ移行 (終了演出はしない)。
+      if (reason === 'normal' && this.#continuing && !this.#continuousActive) {
+        await this.#enterContinue();
+        return;
+      }
+      this.#logger.info({ reason }, '終了演出フロー開始 (ending-spec §第二段階)');
+      this.#updater?.stop();
+      this.#updater = null;
+      this.#debouncer.cancel();
       // 1. 終了音 (4 秒、非同期で開始)。
       this.#logger.info('finish.mp3 再生開始');
       this.#soundNotifier?.playFinish();
       // 2. タイマー Embed 削除。
       await this.#deleteTimerEmbed();
-      // 3. お疲れさま投稿 (通常通知・SuppressNotifications なし)。
-      //    Embed なしの単発テキスト。投稿から 15 秒後に「お疲れさま削除 → 新スタート
-      //    Embed 投稿」を行うフォローアップを setTimeout で予約する (終了演出は止めない)。
-      const farewell = await this.#channel.post(buildFarewellMessage());
-      this.#logger.info({ messageId: farewell.id }, 'お疲れさま投稿 完了');
+      // 3. 終了テキスト投稿 (通常通知・SuppressNotifications なし)。23時間キャップ起因なら
+      //    その旨の文言、それ以外はお疲れさま。Embed なしの単発テキストで、投稿から 15 秒後に
+      //    「削除 → 新スタート Embed 投稿」フォローアップを予約する (終了演出は止めない)。
+      const endingMessage =
+        reason === 'timeout23h' ? buildTimeoutMessage() : buildFarewellMessage();
+      const farewell = await this.#channel.post(endingMessage);
+      this.#logger.info({ messageId: farewell.id, reason }, '終了テキスト投稿 完了');
       this.#scheduleEndingFollowup(farewell.id);
       // 4. finish.mp3 を最後まで聞かせる余韻待機。
       this.#logger.info({ ms: ENDING_DELAY_MS }, '余韻待機');
@@ -311,12 +392,46 @@ export class EmbedManager {
       //    updater/debouncer は既にクリア済み。
       this.#timer.reset();
       this.#currentPhase = 'idle';
+      // 「続行」継続状態・23時間キャップもここでクリアする (新セッションは onTimerStart で再 arm)。
+      this.#resetContinueState();
       // 9. 新スタート Embed はここでは出さない。お疲れさま削除 (投稿15秒後) の直後に
       //    #scheduleEndingFollowup から投稿する。idle 自体へはここで復帰する。
       this.#logger.info('終了演出フロー完了 idle 復帰 (スタート Embed はお疲れさま削除後)');
     } finally {
       this.#isEnding = false;
     }
+  }
+
+  /**
+   * 「続行」継続ループへの移行 (US-続行)。最終休憩終了 (ended) 時に #continuing が真の経路。
+   * 終了演出 (finish/お疲れさま/bot退出/新スタート Embed) は行わず、続行を押していない
+   * 人間だけを退出させてから継続タイマーを開始する。継続タイマーの初回 phaseChange(work) は
+   * 既存の #onPhaseChange 中間切替で処理され、phaseTransitionSound('finalBreak','work')===null の
+   * ため移行音は鳴らない。以降の work↔break は通常どおり work_end / break_end が鳴る。
+   */
+  async #enterContinue(): Promise<void> {
+    this.#continuousActive = true;
+    this.#logger.info(
+      { continueUsers: this.#continueUserIds.size },
+      '続行: 継続ループへ移行 (終了演出はスキップ)',
+    );
+    this.#updater?.stop();
+    this.#updater = null;
+    this.#debouncer.cancel();
+    // 続行を押していない人間のみ強制退出 (押した人は残す)。bot は残留しループを続ける。
+    if (this.#endingActions) {
+      try {
+        await this.#endingActions.kickHumansExcept(this.#continueUserIds);
+        this.#logger.info('続行未押下ユーザの退出 完了');
+      } catch (err) {
+        this.#logger.warn({ err }, '続行未押下ユーザの退出に失敗 (best-effort)');
+      }
+    }
+    // 「ご参加ありがとう」投稿は countdown 抑制で未削除のためここで掃除する。
+    await this.#deleteWelcomeMessage();
+    // 継続タイマー開始 → phaseChange(work) で #onPhaseChange が finalBreak Embed を
+    // 継続 work Embed に貼り替え、updater を再開する。
+    this.#timer.startContinuous(this.#continueWorkSec, this.#continueBreakSec);
   }
 
   /**
@@ -362,7 +477,7 @@ export class EmbedManager {
    * 本文一致で回収する。アクティブセッションが無い前提で呼ぶ (起動直後・idle)。best-effort。
    */
   async purgeOrphanTexts(): Promise<void> {
-    await this.#channel.purgeOwnTexts([WELCOME_CONTENT, FAREWELL_CONTENT]);
+    await this.#channel.purgeOwnTexts([WELCOME_CONTENT, FAREWELL_CONTENT, TIMEOUT_CONTENT]);
   }
 
   async #onPhaseChange(snapshot: TimerSnapshot): Promise<void> {
@@ -456,6 +571,41 @@ export class EmbedManager {
     } catch (err) {
       this.#logger.warn({ err, messageId }, 'Embed 削除に失敗 (best-effort)');
     }
+  }
+
+  /**
+   * セッション開始から 23時間後の強制終了キャップを arm する (US-続行)。
+   * 既存タイマーがあれば張り替える。発火時は継続/通常を問わず実終了し 23時間メッセージを出す。
+   */
+  #arm23hCap(): void {
+    this.#clear23hCap();
+    this.#cap23hTimer = setTimeout(() => {
+      this.#cap23hTimer = null;
+      void this.#force23hEnd();
+    }, CONTINUE_MAX_SESSION_MS);
+  }
+
+  #clear23hCap(): void {
+    if (this.#cap23hTimer !== null) {
+      clearTimeout(this.#cap23hTimer);
+      this.#cap23hTimer = null;
+    }
+  }
+
+  /** 23時間キャップ発火: タイマーを止めてから 23時間メッセージ付きで実終了する。 */
+  async #force23hEnd(): Promise<void> {
+    this.#logger.info('セッション開始から23時間経過: 強制終了します');
+    // 継続タイマーは自走するため、終了演出に入る前に必ず止める (tick による再投稿を防ぐ)。
+    this.#timer.reset();
+    await this.onEnded('timeout23h');
+  }
+
+  /** 「続行」継続状態と 23時間キャップを初期化する (セッション開始・終了・idle で呼ぶ)。 */
+  #resetContinueState(): void {
+    this.#continuing = false;
+    this.#continuousActive = false;
+    this.#continueUserIds.clear();
+    this.#clear23hCap();
   }
 
   /** 予約済みの終了フォローアップ (お疲れさま削除→スタート Embed 投稿) を解除する。 */

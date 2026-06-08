@@ -3,12 +3,15 @@ import type { MessageCreateOptions } from 'discord.js';
 import type { Logger } from 'pino';
 import type { BotConfig, TimerSnapshot } from '@co-working-call/shared';
 import {
+  CONTINUE_MAX_SESSION_MS,
   EmbedManager,
   shouldHandleHumanMessage,
   type EmbedChannel,
   type PostedMessage,
   type TimerLike,
 } from './embed-manager.js';
+import { TIMEOUT_CONTENT } from './timeout-message.js';
+import { FAREWELL_CONTENT } from './farewell-message.js';
 import type { PhaseSoundNotifier } from './sound-notifier.js';
 
 const config: BotConfig = {
@@ -28,6 +31,7 @@ type Ev = 'phaseChange' | 'countdown' | 'ended';
 class FakeTimer implements TimerLike {
   snapshot: TimerSnapshot = makeSnapshot('idle');
   resetCallCount = 0;
+  startContinuousCalls: { workSec: number; breakSec: number }[] = [];
   #listeners = new Map<Ev, ((s: TimerSnapshot) => void)[]>();
 
   getSnapshot(): TimerSnapshot {
@@ -51,6 +55,19 @@ class FakeTimer implements TimerLike {
   reset(): void {
     this.resetCallCount += 1;
     this.snapshot = makeSnapshot('idle');
+  }
+
+  /** 実 PomodoroTimer 同様、開始で work への phaseChange (継続スナップショット) を発火する。 */
+  startContinuous(workSec: number, breakSec: number): void {
+    this.startContinuousCalls.push({ workSec, breakSec });
+    this.emit('phaseChange', {
+      phase: 'work',
+      remainingMs: workSec * 1000,
+      currentSet: 1,
+      totalSets: 0,
+      startedAt: 0,
+      continuous: true,
+    });
   }
 }
 
@@ -105,10 +122,14 @@ function fakeSound() {
 
 function fakeEndingActions() {
   const kickAllHumans = vi.fn<() => Promise<void>>(() => Promise.resolve());
+  const kickHumansExcept = vi.fn<(except: ReadonlySet<string>) => Promise<void>>(() =>
+    Promise.resolve(),
+  );
   const disconnectBot = vi.fn();
   return {
-    actions: { kickAllHumans, disconnectBot },
+    actions: { kickAllHumans, kickHumansExcept, disconnectBot },
     kickAllHumans,
+    kickHumansExcept,
     disconnectBot,
   };
 }
@@ -852,5 +873,141 @@ describe('EmbedManager 孤児テキスト掃除 / isEnding (監査観察事項1-
     const delsAfterRestart = del.mock.calls.length;
     await vi.advanceTimersByTimeAsync(60_000);
     expect(del.mock.calls.length).toBe(delsAfterRestart);
+  });
+
+  describe('「続行」継続機能 (US-続行)', () => {
+    function setupContinue() {
+      const fc = fakeChannel();
+      const timer = new FakeTimer();
+      const sound = fakeSound();
+      const ea = fakeEndingActions();
+      const m = new EmbedManager({
+        channel: fc.channel,
+        timer,
+        config,
+        logger,
+        soundNotifier: sound.notifier,
+        endingActions: ea.actions,
+        endingDelay: () => Promise.resolve(),
+      });
+      return { fc, timer, sound, ea, m };
+    }
+
+    /** work → finalBreak まで進めて #currentPhase='finalBreak' にする。 */
+    async function reachFinalBreak(timer: FakeTimer): Promise<void> {
+      timer.emit('phaseChange', makeSnapshot('work'));
+      await vi.advanceTimersByTimeAsync(0);
+      timer.emit('phaseChange', makeSnapshot('finalBreak'));
+      await vi.advanceTimersByTimeAsync(0);
+    }
+
+    const postedContents = (fc: ReturnType<typeof fakeChannel>): string[] =>
+      fc.post.mock.calls
+        .map((c) => (c[0] as { content?: string }).content)
+        .filter((c): c is string => typeof c === 'string');
+
+    it('最終休憩でのみ registerContinueUser を受理する', async () => {
+      const { timer, m } = setupContinue();
+      // work 中は不可。
+      timer.emit('phaseChange', makeSnapshot('work'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(m.registerContinueUser('u1')).toBe('closed');
+      // finalBreak で可。
+      timer.emit('phaseChange', makeSnapshot('finalBreak'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(m.registerContinueUser('u1')).toBe('ok');
+    });
+
+    it('続行受付後は countdown 演出 (終了予告音) を抑制する', async () => {
+      const { timer, sound, m } = setupContinue();
+      await reachFinalBreak(timer);
+      expect(m.registerContinueUser('u1')).toBe('ok');
+      timer.emit('countdown', makeSnapshot('countdown'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sound.playCountdownWarning).not.toHaveBeenCalled();
+    });
+
+    it('続行ありの ended は終了演出せず継続ループへ移行する (押した人以外を退出)', async () => {
+      const { timer, sound, ea, m } = setupContinue();
+      await reachFinalBreak(timer);
+      m.registerContinueUser('u1');
+      m.registerContinueUser('u2');
+      timer.emit('ended', makeSnapshot('ended'));
+      await vi.advanceTimersByTimeAsync(0);
+
+      // 押していない人だけ退出 (except に u1/u2)、全員退出/bot退出/終了音はしない。
+      expect(ea.kickHumansExcept).toHaveBeenCalledTimes(1);
+      const except = ea.kickHumansExcept.mock.calls[0]?.[0];
+      expect(except?.has('u1')).toBe(true);
+      expect(except?.has('u2')).toBe(true);
+      expect(ea.kickAllHumans).not.toHaveBeenCalled();
+      expect(ea.disconnectBot).not.toHaveBeenCalled();
+      expect(sound.playFinish).not.toHaveBeenCalled();
+      // 開始時の作業/休憩秒で継続開始。
+      expect(timer.startContinuousCalls).toEqual([{ workSec: 1500, breakSec: 300 }]);
+      expect(m.continuousActive).toBe(true);
+    });
+
+    it('継続移行後の ended (VC 0 人相当) は実終了する', async () => {
+      const { fc, timer, sound, ea, m } = setupContinue();
+      await reachFinalBreak(timer);
+      m.registerContinueUser('u1');
+      timer.emit('ended', makeSnapshot('ended'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(m.continuousActive).toBe(true);
+
+      // VC 空経由の終了演出 (triggerEndingFlow 相当) を再度呼ぶ。
+      await m.onEnded('normal');
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(sound.playFinish).toHaveBeenCalledTimes(1);
+      expect(ea.kickAllHumans).toHaveBeenCalledTimes(1);
+      expect(ea.disconnectBot).toHaveBeenCalledTimes(1);
+      expect(postedContents(fc)).toContain(FAREWELL_CONTENT);
+      expect(m.continuousActive).toBe(false);
+    });
+
+    it('誰も押さない最終休憩→ended は従来どおり終了演出する', async () => {
+      const { fc, timer, sound, ea, m } = setupContinue();
+      await reachFinalBreak(timer);
+      // 続行なしで countdown → ended。
+      timer.emit('countdown', makeSnapshot('countdown'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sound.playCountdownWarning).toHaveBeenCalledTimes(1);
+      timer.emit('ended', makeSnapshot('ended'));
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(sound.playFinish).toHaveBeenCalledTimes(1);
+      expect(ea.kickAllHumans).toHaveBeenCalledTimes(1);
+      expect(ea.kickHumansExcept).not.toHaveBeenCalled();
+      expect(timer.startContinuousCalls).toEqual([]);
+      expect(m.continuousActive).toBe(false);
+      expect(postedContents(fc)).toContain(FAREWELL_CONTENT);
+    });
+
+    it('セッション開始から23時間で強制終了し timeout メッセージを投稿する', async () => {
+      // m は構築時に timer を購読しキャップ closure からも参照されるため未使用で問題ない。
+      const { fc, timer, sound, ea } = setupContinue();
+      // onTimerStart で 23時間キャップが arm される。
+      timer.emit('phaseChange', makeSnapshot('work'));
+      await vi.advanceTimersByTimeAsync(0);
+      // 更新タイマーの空回しと canvas 再描画を避けるため、updater がスキップする
+      // フェーズかつ大きな残り時間に差し替える (キャップ発火自体には影響しない)。
+      timer.snapshot = {
+        phase: 'idle',
+        remainingMs: CONTINUE_MAX_SESSION_MS,
+        currentSet: 0,
+        totalSets: 4,
+        startedAt: 0,
+      };
+
+      await vi.advanceTimersByTimeAsync(CONTINUE_MAX_SESSION_MS);
+
+      expect(timer.resetCallCount).toBeGreaterThanOrEqual(1);
+      expect(sound.playFinish).toHaveBeenCalledTimes(1);
+      expect(ea.kickAllHumans).toHaveBeenCalledTimes(1);
+      expect(ea.disconnectBot).toHaveBeenCalledTimes(1);
+      expect(postedContents(fc)).toContain(TIMEOUT_CONTENT);
+    });
   });
 });

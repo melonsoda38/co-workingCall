@@ -5,5 +5,6 @@ export * from './timer-embed-updater.js';
 export * from './repost-debouncer.js';
 export * from './sound-notifier.js';
 export * from './farewell-message.js';
+export * from './timeout-message.js';
 export * from './welcome-message.js';
 export * from './embed-manager.js';

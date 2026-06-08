@@ -1,7 +1,7 @@
-import { EmbedBuilder, MessageFlags } from 'discord.js';
+import { ActionRowBuilder, ButtonBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
 import { describe, expect, it } from 'vitest';
 import type { BotConfig, TimerSnapshot } from '@co-working-call/shared';
-import { TIMER_IMAGE_NAME, buildTimerEmbedMessage } from './timer-embed.js';
+import { CONTINUE_BUTTON_ID, TIMER_IMAGE_NAME, buildTimerEmbedMessage } from './timer-embed.js';
 
 const config: BotConfig = {
   default: { workSec: 1500, breakSec: 300, sets: 4, finalBreakSec: 900 },
@@ -49,5 +49,27 @@ describe('buildTimerEmbedMessage', () => {
     expect(color(snap({ phase: 'break' }))).toBe(0x2ecc71);
     expect(color(snap({ phase: 'finalBreak' }))).toBe(0x95a5a6);
     expect(color(snap({ phase: 'countdown' }))).toBe(0xf1c40f);
+  });
+
+  it('finalBreak: footer に「続ける場合:」を足し、続行ボタンを 1 つ付ける', () => {
+    const msg = buildTimerEmbedMessage(snap({ phase: 'finalBreak' }), config);
+    const json = (msg.embeds?.[0] as EmbedBuilder).toJSON();
+    expect(json.footer?.text).toBe('作業25分 / 休憩5分 / 4セット / 最終休憩15分\n続ける場合:');
+
+    expect(msg.components).toHaveLength(1);
+    const row = (msg.components?.[0] as ActionRowBuilder<ButtonBuilder>).toJSON();
+    expect(row.components).toHaveLength(1);
+    const button = row.components[0] as { custom_id?: string; label?: string };
+    expect(button.custom_id).toBe(CONTINUE_BUTTON_ID);
+    expect(button.label).toBe('続行');
+  });
+
+  it('work/break/countdown には続行ボタンも続行案内テキストも付かない', () => {
+    for (const phase of ['work', 'break', 'countdown'] as const) {
+      const msg = buildTimerEmbedMessage(snap({ phase }), config);
+      const json = (msg.embeds?.[0] as EmbedBuilder).toJSON();
+      expect(json.footer?.text).toBe('作業25分 / 休憩5分 / 4セット / 最終休憩15分');
+      expect(msg.components ?? []).toHaveLength(0);
+    }
   });
 });
