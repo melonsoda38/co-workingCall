@@ -3,6 +3,7 @@ import type { Logger } from 'pino';
 import {
   SETTINGS_MODAL_ID,
   handleAdminRole,
+  handleContinueButton,
   handlePomoInit,
   handlePomoStop,
   handleSettingsButton,
@@ -11,7 +12,12 @@ import {
   registerCommands,
 } from '../commands/index.js';
 import { loadConfig } from '../config/index.js';
-import { SETTINGS_BUTTON_ID, START_BUTTON_ID, shouldHandleHumanMessage } from '../embed/index.js';
+import {
+  CONTINUE_BUTTON_ID,
+  SETTINGS_BUTTON_ID,
+  START_BUTTON_ID,
+  shouldHandleHumanMessage,
+} from '../embed/index.js';
 import {
   createVoiceSessionRegistry,
   setupVoiceFeature,
@@ -82,6 +88,11 @@ export async function startBot(token: string, logger: Logger, configPath: string
     if (interaction.isButton() && interaction.customId === START_BUTTON_ID) {
       const session = interaction.guildId ? sessions.get(interaction.guildId) : undefined;
       void handleStartButton(interaction, session, configPath, logger);
+      return;
+    }
+    if (interaction.isButton() && interaction.customId === CONTINUE_BUTTON_ID) {
+      const session = interaction.guildId ? sessions.get(interaction.guildId) : undefined;
+      void handleContinueButton(interaction, session, logger);
       return;
     }
     if (interaction.isButton() && interaction.customId === SETTINGS_BUTTON_ID) {

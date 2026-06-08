@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import type { TimerConfig, TimerPhase, TimerSnapshot } from '@co-working-call/shared';
-import { TICK_MS, computePhase } from './phase.js';
+import { TICK_MS, computeContinuousPhase, computePhase } from './phase.js';
 
 /** PomodoroTimer が発火するイベントとそのペイロード。 */
 export interface TimerEventMap {
@@ -22,10 +22,18 @@ export class PomodoroTimer extends EventEmitter {
   #totalSets = 0;
   #currentPhase: TimerPhase = 'idle';
   #interval: NodeJS.Timeout | null = null;
+  /**
+   * 「続行」継続モードか。true の間は finalBreak/countdown/ended を持たず work/break を
+   * 無限ループする (終了は VC 0 人 or 23時間キャップで外部から reset される)。
+   */
+  #continuous = false;
+  #continuousWorkSec = 0;
+  #continuousBreakSec = 0;
 
   /** タイマー開始。動作中なら一旦停止してから開始する。 */
   start(config: TimerConfig): void {
     this.#stopInterval();
+    this.#continuous = false;
     this.#config = config;
     this.#totalSets = config.sets;
     this.#startedAt = Date.now();
@@ -37,10 +45,31 @@ export class PomodoroTimer extends EventEmitter {
     }, TICK_MS);
   }
 
+  /**
+   * 「続行」継続モードで開始する (US-続行)。開始時の作業/休憩時間で work/break を無限ループし、
+   * countdown/ended は発火しない。startedAt は再採番する (継続ループ自体の経過起点)。
+   * 23時間キャップはセッション開始時刻基準で EmbedManager が別管理する。
+   */
+  startContinuous(workSec: number, breakSec: number): void {
+    this.#stopInterval();
+    this.#continuous = true;
+    this.#continuousWorkSec = workSec;
+    this.#continuousBreakSec = breakSec;
+    this.#config = null;
+    this.#totalSets = 0;
+    this.#startedAt = Date.now();
+    this.#currentPhase = 'idle';
+    this.#tick();
+    this.#interval = setInterval(() => {
+      this.#tick();
+    }, TICK_MS);
+  }
+
   /** タイマーを停止し idle に戻す (手動停止)。 */
   stop(): void {
     const wasRunning = this.#startedAt !== null;
     this.#stopInterval();
+    this.#continuous = false;
     this.#config = null;
     this.#startedAt = null;
     this.#currentPhase = 'idle';
@@ -56,6 +85,23 @@ export class PomodoroTimer extends EventEmitter {
 
   /** 現在の状態スナップショットを返す。 */
   getSnapshot(): TimerSnapshot {
+    // 継続モード: work/break を無限ループし currentSet は継続回数 (cycle)。
+    if (this.#continuous && this.#startedAt !== null) {
+      const elapsed = Date.now() - this.#startedAt;
+      const { phase, cycle, phaseRemainingMs } = computeContinuousPhase(
+        elapsed,
+        this.#continuousWorkSec,
+        this.#continuousBreakSec,
+      );
+      return {
+        phase,
+        remainingMs: phaseRemainingMs,
+        currentSet: cycle,
+        totalSets: 0,
+        startedAt: this.#startedAt,
+        continuous: true,
+      };
+    }
     if (this.#config === null || this.#startedAt === null) {
       return {
         phase: 'idle',
@@ -77,7 +123,8 @@ export class PomodoroTimer extends EventEmitter {
   }
 
   #tick(): void {
-    if (this.#config === null || this.#startedAt === null) {
+    // 通常モードは #config 必須。継続モードは #startedAt のみで駆動する。
+    if (this.#startedAt === null || (!this.#continuous && this.#config === null)) {
       return;
     }
     const snapshot = this.getSnapshot();
@@ -87,14 +134,17 @@ export class PomodoroTimer extends EventEmitter {
     if (nextPhase !== prevPhase) {
       this.#currentPhase = nextPhase;
       this.emit('phaseChange', snapshot);
-      if (nextPhase === 'countdown') {
-        this.emit('countdown', snapshot);
-      }
-      if (nextPhase === 'ended') {
-        this.emit('ended', snapshot);
-        // ended で停止し phase を保持する (idle 復帰は reset() 側の責務)。
-        this.#stopInterval();
-        return;
+      // 継続モードは countdown/ended を持たず work/break のループのみ。
+      if (!this.#continuous) {
+        if (nextPhase === 'countdown') {
+          this.emit('countdown', snapshot);
+        }
+        if (nextPhase === 'ended') {
+          this.emit('ended', snapshot);
+          // ended で停止し phase を保持する (idle 復帰は reset() 側の責務)。
+          this.#stopInterval();
+          return;
+        }
       }
     }
     this.emit('tick', snapshot);

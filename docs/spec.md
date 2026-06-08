@@ -47,6 +47,11 @@ Pi起動 → systemd が bot 起動
 **重要**: タイマー終了時に process.exit() しない (Pi稼働中ずっと常駐)
 VC接続管理は人間ユーザー数連動 (タイマー状態と独立)
 
+**「続行」継続 (US-続行)**: 最終休憩中に「続行」を押すと、最終休憩終了時に終了演出をせず
+継続ループ (開始時の作業/休憩時間で work/break を無限ループ) へ移行する。続行を押した人だけ
+VC に残り、押していない人は退出する。終了は VC が 0 人になるか、セッション開始から 23 時間後の
+強制終了のいずれか。詳細は @docs/ending-spec.md §続行。
+
 ## フェーズ遷移
 
 ```
@@ -86,6 +91,7 @@ remainingMs  : number
 currentSet   : number
 totalSets    : number
 startedAt    : number | null
+continuous   : boolean (任意)   // 「続行」継続ループ中は true。currentSet は継続回数(cycle)
 ```
 
 ### BotConfig (永続化設定、config.json)

@@ -86,4 +86,28 @@ describe('TimerSnapshotSchema', () => {
       }).success,
     ).toBe(false);
   });
+
+  it('continuous は省略可能で、true も受理する', () => {
+    // 省略時 (通常セッション)。
+    const omitted = TimerSnapshotSchema.safeParse({
+      phase: 'work',
+      remainingMs: 1000,
+      currentSet: 1,
+      totalSets: 4,
+      startedAt: null,
+    });
+    expect(omitted.success).toBe(true);
+    expect(omitted.success && omitted.data.continuous).toBeUndefined();
+    // 継続モード。
+    expect(
+      TimerSnapshotSchema.safeParse({
+        phase: 'work',
+        remainingMs: 1000,
+        currentSet: 3,
+        totalSets: 0,
+        startedAt: 1_700_000_000_000,
+        continuous: true,
+      }).success,
+    ).toBe(true);
+  });
 });

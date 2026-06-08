@@ -113,4 +113,39 @@ describe('PomodoroTimer', () => {
     expect(ticks).toBe(11);
     timer.reset();
   });
+
+  describe('startContinuous (継続モード)', () => {
+    it('work→break→work… を無限ループし countdown/ended を発火しない', () => {
+      const timer = new PomodoroTimer();
+      const phases: string[] = [];
+      const terminal: string[] = [];
+      timer.on('phaseChange', (s) => phases.push(`${s.phase}#${String(s.currentSet)}`));
+      timer.on('countdown', () => terminal.push('countdown'));
+      timer.on('ended', () => terminal.push('ended'));
+
+      // 1 サイクル = work 60s + break 30s = 90s。
+      timer.startContinuous(60, 30);
+      const snap = timer.getSnapshot();
+      expect(snap.phase).toBe('work');
+      expect(snap.continuous).toBe(true);
+      expect(snap.totalSets).toBe(0);
+
+      // 2.5 サイクル進める (225s)。
+      vi.advanceTimersByTime(225_000);
+
+      expect(phases).toEqual(['work#1', 'break#1', 'work#2', 'break#2', 'work#3']);
+      expect(terminal).toEqual([]);
+      timer.reset();
+    });
+
+    it('reset で継続モードが解除され idle に戻る', () => {
+      const timer = new PomodoroTimer();
+      timer.startContinuous(60, 30);
+      vi.advanceTimersByTime(5_000);
+      timer.reset();
+      const snap = timer.getSnapshot();
+      expect(snap.phase).toBe('idle');
+      expect(snap.continuous).toBeUndefined();
+    });
+  });
 });

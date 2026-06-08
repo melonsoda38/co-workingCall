@@ -105,12 +105,18 @@ export function phaseTextPlain(snapshot: TimerSnapshot): string {
   }
 }
 
-/** セット進捗 ("N/M" / それ以外は空。countdown は中央「まもなく」のみで下段なし)。 */
+/**
+ * セット進捗 ("N/M" / それ以外は空。countdown は中央「まもなく」のみで下段なし)。
+ * 「続行」継続モード (snapshot.continuous) では通常のセット数は無意味なので、代わりに
+ * 継続回数を "N回目" で表示する (currentSet を継続サイクル番号として使う)。
+ */
 export function setText(snapshot: TimerSnapshot): string {
   switch (snapshot.phase) {
     case 'work':
     case 'break':
-      return `${String(snapshot.currentSet)}/${String(snapshot.totalSets)}`;
+      return snapshot.continuous
+        ? `${String(snapshot.currentSet)}回目`
+        : `${String(snapshot.currentSet)}/${String(snapshot.totalSets)}`;
     case 'finalBreak':
     case 'countdown':
     case 'idle':

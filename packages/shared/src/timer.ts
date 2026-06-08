@@ -38,5 +38,11 @@ export const TimerSnapshotSchema = z.object({
   currentSet: z.number().int(),
   totalSets: z.number().int(),
   startedAt: z.number().int().nullable(),
+  /**
+   * 「続行」による継続ループ中なら true (省略時は通常セッション扱い)。
+   * 継続中は countdown/ended に達せず work/break を無限に繰り返し、currentSet を
+   * 「継続回数 (cycle)」として使う (totalSets は 0)。画像表示の出し分けに用いる。
+   */
+  continuous: z.boolean().optional(),
 });
 export type TimerSnapshot = z.infer<typeof TimerSnapshotSchema>;
