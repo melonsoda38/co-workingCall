@@ -27,6 +27,7 @@ function makeMessage(opts: {
   id: string;
   authorId: string;
   embeds: number;
+  components?: number;
   content?: string;
   deleteImpl?: () => Promise<void>;
 }): PurgeMessage & { delete: ReturnType<typeof vi.fn> } {
@@ -35,6 +36,7 @@ function makeMessage(opts: {
     id: opts.id,
     author: { id: opts.authorId },
     embeds: new Array<unknown>(opts.embeds),
+    components: new Array<unknown>(opts.components ?? 0),
     content: opts.content ?? '',
     delete: del,
   };
@@ -56,6 +58,22 @@ describe('purgeOwnEmbeds', () => {
     expect(own2.delete).toHaveBeenCalledTimes(1);
     expect(human.delete).not.toHaveBeenCalled();
     expect(ownNoEmbed.delete).not.toHaveBeenCalled();
+  });
+
+  it('Embed が無くてもコンポーネント付き (V2 タイマーカード) なら削除する', async () => {
+    // 最終休憩/カウントダウンの V2 カードは embeds 0・components ありで来る。
+    const v2card = makeMessage({ id: 'v2', authorId: 'BOT', embeds: 0, components: 1 });
+    // Embed もコンポーネントも無い bot のプレーンテキスト (歓迎等) は対象外。
+    const plain = makeMessage({ id: 'p', authorId: 'BOT', embeds: 0, components: 0 });
+    const humanCard = makeMessage({ id: 'h', authorId: 'USER', embeds: 0, components: 1 });
+    const fetch = vi.fn(() => Promise.resolve(collection([v2card, plain, humanCard])));
+    const channel = { messages: { fetch } };
+
+    await purgeOwnEmbeds(channel, 'BOT', logger);
+
+    expect(v2card.delete).toHaveBeenCalledTimes(1);
+    expect(plain.delete).not.toHaveBeenCalled();
+    expect(humanCard.delete).not.toHaveBeenCalled();
   });
 
   it('fetch 失敗時は warn ログのみで例外を投げない', async () => {
