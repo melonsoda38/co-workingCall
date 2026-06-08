@@ -123,24 +123,26 @@ describe('PomodoroTimer', () => {
       timer.on('countdown', () => terminal.push('countdown'));
       timer.on('ended', () => terminal.push('ended'));
 
-      // 1 サイクル = work 60s + break 30s = 90s。
-      timer.startContinuous(60, 30);
+      // 1 サイクル = work 60s + break 30s = 90s。元セッションは 4 セット実施済み。
+      timer.startContinuous(60, 30, 4);
       const snap = timer.getSnapshot();
       expect(snap.phase).toBe('work');
       expect(snap.continuous).toBe(true);
       expect(snap.totalSets).toBe(0);
+      // currentSet は累計 (baseSets 4 + 継続サイクル 1) = 5。
+      expect(snap.currentSet).toBe(5);
 
-      // 2.5 サイクル進める (225s)。
+      // 2.5 サイクル進める (225s)。currentSet は 4 + cycle で累計表示される。
       vi.advanceTimersByTime(225_000);
 
-      expect(phases).toEqual(['work#1', 'break#1', 'work#2', 'break#2', 'work#3']);
+      expect(phases).toEqual(['work#5', 'break#5', 'work#6', 'break#6', 'work#7']);
       expect(terminal).toEqual([]);
       timer.reset();
     });
 
     it('reset で継続モードが解除され idle に戻る', () => {
       const timer = new PomodoroTimer();
-      timer.startContinuous(60, 30);
+      timer.startContinuous(60, 30, 4);
       vi.advanceTimersByTime(5_000);
       timer.reset();
       const snap = timer.getSnapshot();

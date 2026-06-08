@@ -41,6 +41,8 @@ describe('buildTimerEmbedMessage', () => {
 
     expect(msg.flags).toBe(MessageFlags.SuppressNotifications);
     expect(msg.components ?? []).toHaveLength(0);
+    // 作業中は続行案内テキストを出さない。
+    expect(msg.content ?? '').toBe('');
   });
 
   it('break / finalBreak / countdown で左バー色が変わる', () => {
@@ -51,10 +53,12 @@ describe('buildTimerEmbedMessage', () => {
     expect(color(snap({ phase: 'countdown' }))).toBe(0xf1c40f);
   });
 
-  it('finalBreak: footer に「続ける場合:」を足し、続行ボタンを 1 つ付ける', () => {
+  it('finalBreak: 画像の外 (content) に太字の続行案内、Embed 下に続行ボタンを付ける', () => {
     const msg = buildTimerEmbedMessage(snap({ phase: 'finalBreak' }), config);
     const json = (msg.embeds?.[0] as EmbedBuilder).toJSON();
-    expect(json.footer?.text).toBe('作業25分 / 休憩5分 / 4セット / 最終休憩15分\n続ける場合:');
+    // 続行案内は footer (画像下) ではなく content (画像の外) に太字で出す。
+    expect(json.footer?.text).toBe('作業25分 / 休憩5分 / 4セット / 最終休憩15分');
+    expect(msg.content).toBe('**続ける場合:**');
 
     expect(msg.components).toHaveLength(1);
     const row = (msg.components?.[0] as ActionRowBuilder<ButtonBuilder>).toJSON();
@@ -70,6 +74,7 @@ describe('buildTimerEmbedMessage', () => {
       const json = (msg.embeds?.[0] as EmbedBuilder).toJSON();
       expect(json.footer?.text).toBe('作業25分 / 休憩5分 / 4セット / 最終休憩15分');
       expect(msg.components ?? []).toHaveLength(0);
+      expect(msg.content ?? '').toBe('');
     }
   });
 });

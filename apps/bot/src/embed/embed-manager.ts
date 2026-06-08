@@ -95,8 +95,9 @@ export interface TimerLike {
   /**
    * 「続行」継続モードで開始する (US-続行)。開始時の作業/休憩時間で work/break を
    * 無限ループし countdown/ended を発火しない。最終休憩終了時の継続移行で呼ぶ。
+   * baseSets は継続開始までに実施済みの作業セット数 (元セッションの sets)。
    */
-  startContinuous(workSec: number, breakSec: number): void;
+  startContinuous(workSec: number, breakSec: number, baseSets: number): void;
 }
 
 export interface EmbedManagerDeps {
@@ -172,6 +173,8 @@ export class EmbedManager {
   /** 継続ループで使う作業/休憩秒。セッション開始時 (onTimerStart) に確保する。 */
   #continueWorkSec = 0;
   #continueBreakSec = 0;
+  /** 元セッションの実施セット数。継続中の「累計の実施セット数」表示の起点に使う。 */
+  #continueBaseSets = 0;
   /** セッション開始からの 23時間キャップ用タイマー。 */
   #cap23hTimer: NodeJS.Timeout | null = null;
 
@@ -250,6 +253,7 @@ export class EmbedManager {
     this.#resetContinueState();
     this.#continueWorkSec = this.#config.default.workSec;
     this.#continueBreakSec = this.#config.default.breakSec;
+    this.#continueBaseSets = this.#config.default.sets;
     this.#arm23hCap();
     // 前回 ended のお疲れさま (15秒削除待ち) や、再起動で id 追跡を失った孤児の
     // 歓迎/お疲れさまテキストを、新セッションの歓迎投稿前に掃除する。
@@ -431,7 +435,11 @@ export class EmbedManager {
     await this.#deleteWelcomeMessage();
     // 継続タイマー開始 → phaseChange(work) で #onPhaseChange が finalBreak Embed を
     // 継続 work Embed に貼り替え、updater を再開する。
-    this.#timer.startContinuous(this.#continueWorkSec, this.#continueBreakSec);
+    this.#timer.startContinuous(
+      this.#continueWorkSec,
+      this.#continueBreakSec,
+      this.#continueBaseSets,
+    );
   }
 
   /**
