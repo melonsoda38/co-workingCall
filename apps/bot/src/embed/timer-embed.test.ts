@@ -1,4 +1,4 @@
-import { ActionRowBuilder, ButtonBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
+import { ContainerBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
 import { describe, expect, it } from 'vitest';
 import type { BotConfig, TimerSnapshot } from '@co-working-call/shared';
 import { CONTINUE_BUTTON_ID, TIMER_IMAGE_NAME, buildTimerEmbedMessage } from './timer-embed.js';
@@ -11,6 +11,8 @@ const config: BotConfig = {
   adminRoleNames: [],
 };
 
+const SUMMARY = '作業25分 / 休憩5分 / 4セット / 最終休憩15分';
+
 const snap = (over: Partial<TimerSnapshot>): TimerSnapshot => ({
   phase: 'work',
   remainingMs: 600_000,
@@ -20,8 +22,34 @@ const snap = (over: Partial<TimerSnapshot>): TimerSnapshot => ({
   ...over,
 });
 
+/** Components V2 Container を toJSON して中身を取り出すヘルパ。 */
+interface V2Component {
+  type: number;
+  content?: string;
+  items?: { media: { url: string } }[];
+  components?: { custom_id?: string; label?: string }[];
+}
+function containerOf(msg: ReturnType<typeof buildTimerEmbedMessage>): {
+  accentColor: number | null | undefined;
+  texts: string[];
+  imageUrl: string | undefined;
+  buttons: { custom_id?: string; label?: string }[];
+} {
+  const json = (msg.components?.[0] as ContainerBuilder).toJSON();
+  const comps = json.components as unknown as V2Component[];
+  const texts = comps.filter((c) => c.type === 10).map((c) => c.content ?? '');
+  const gallery = comps.find((c) => c.type === 12);
+  const row = comps.find((c) => c.type === 1);
+  return {
+    accentColor: json.accent_color,
+    texts,
+    imageUrl: gallery?.items?.[0]?.media.url,
+    buttons: row?.components ?? [],
+  };
+}
+
 describe('buildTimerEmbedMessage', () => {
-  it('work: title / color / 画像添付 / 設定サマリ footer / SuppressNotifications', () => {
+  it('work: Embed (title / color / 画像 / 設定サマリ footer / SuppressNotifications・V2でない)', () => {
     const msg = buildTimerEmbedMessage(snap({ phase: 'work', remainingMs: 90_000 }), config);
     const embed = msg.embeds?.[0];
     expect(embed).toBeInstanceOf(EmbedBuilder);
@@ -29,52 +57,57 @@ describe('buildTimerEmbedMessage', () => {
 
     expect(json.title).toBe('Timer');
     expect(json.color).toBe(0x3498db); // work=青
-
-    // 円形画像を attachment:// で参照。
     expect(json.image?.url).toBe(`attachment://${TIMER_IMAGE_NAME}`);
-    // files に PNG が 1 つ添付される。
     expect(msg.files).toHaveLength(1);
-
-    // 設定サマリは画像の下 (footer) に出す。title 直下の余白用 field は持たない。
     expect(json.fields ?? []).toHaveLength(0);
-    expect(json.footer?.text).toBe('作業25分 / 休憩5分 / 4セット / 最終休憩15分');
+    expect(json.footer?.text).toBe(SUMMARY);
 
     expect(msg.flags).toBe(MessageFlags.SuppressNotifications);
     expect(msg.components ?? []).toHaveLength(0);
-    // 作業中は続行案内テキストを出さない。
-    expect(msg.content ?? '').toBe('');
   });
 
-  it('break / finalBreak / countdown で左バー色が変わる', () => {
-    const color = (s: TimerSnapshot): number | undefined =>
-      (buildTimerEmbedMessage(s, config).embeds?.[0] as EmbedBuilder).toJSON().color;
-    expect(color(snap({ phase: 'break' }))).toBe(0x2ecc71);
-    expect(color(snap({ phase: 'finalBreak' }))).toBe(0x95a5a6);
-    expect(color(snap({ phase: 'countdown' }))).toBe(0xf1c40f);
+  it('break も Embed (緑バー)', () => {
+    const msg = buildTimerEmbedMessage(snap({ phase: 'break' }), config);
+    expect((msg.embeds?.[0] as EmbedBuilder).toJSON().color).toBe(0x2ecc71);
+    expect(msg.components ?? []).toHaveLength(0);
   });
 
-  it('finalBreak: 画像の外 (content) に太字の続行案内、Embed 下に続行ボタンを付ける', () => {
+  it('finalBreak: Components V2 で画像の下に太字「続ける場合:」と続行ボタン', () => {
     const msg = buildTimerEmbedMessage(snap({ phase: 'finalBreak' }), config);
-    const json = (msg.embeds?.[0] as EmbedBuilder).toJSON();
-    // 続行案内は footer (画像下) ではなく content (画像の外) に太字で出す。
-    expect(json.footer?.text).toBe('作業25分 / 休憩5分 / 4セット / 最終休憩15分');
-    expect(msg.content).toBe('**続ける場合:**');
+    // V2 メッセージは Embed を持たず、IsComponentsV2 + SuppressNotifications フラグが立つ。
+    expect(msg.embeds ?? []).toHaveLength(0);
+    expect(Number(msg.flags) & MessageFlags.IsComponentsV2).toBeTruthy();
+    expect(Number(msg.flags) & MessageFlags.SuppressNotifications).toBeTruthy();
 
-    expect(msg.components).toHaveLength(1);
-    const row = (msg.components?.[0] as ActionRowBuilder<ButtonBuilder>).toJSON();
-    expect(row.components).toHaveLength(1);
-    const button = row.components[0] as { custom_id?: string; label?: string };
-    expect(button.custom_id).toBe(CONTINUE_BUTTON_ID);
-    expect(button.label).toBe('続行');
+    const { accentColor, texts, imageUrl, buttons } = containerOf(msg);
+    expect(accentColor).toBe(0x95a5a6); // finalBreak=グレー
+    expect(imageUrl).toBe(`attachment://${TIMER_IMAGE_NAME}`);
+    // タイトル・設定サマリ (subtext)・太字の続行案内が、画像の下にこの順で並ぶ。
+    expect(texts).toEqual(['**Timer**', `-# ${SUMMARY}`, '**続ける場合:**']);
+    // 続行案内 (太字) は画像 (gallery, index 1) より後・ボタンより前。
+    const imageIdx = (msg.components?.[0] as ContainerBuilder)
+      .toJSON()
+      .components.findIndex((c) => (c as { type: number }).type === 12);
+    const promptIdx = (msg.components?.[0] as ContainerBuilder)
+      .toJSON()
+      .components.findIndex((c) => (c as { content?: string }).content === '**続ける場合:**');
+    expect(promptIdx).toBeGreaterThan(imageIdx);
+
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]?.custom_id).toBe(CONTINUE_BUTTON_ID);
+    expect(buttons[0]?.label).toBe('続行');
   });
 
-  it('work/break/countdown には続行ボタンも続行案内テキストも付かない', () => {
-    for (const phase of ['work', 'break', 'countdown'] as const) {
-      const msg = buildTimerEmbedMessage(snap({ phase }), config);
-      const json = (msg.embeds?.[0] as EmbedBuilder).toJSON();
-      expect(json.footer?.text).toBe('作業25分 / 休憩5分 / 4セット / 最終休憩15分');
-      expect(msg.components ?? []).toHaveLength(0);
-      expect(msg.content ?? '').toBe('');
-    }
+  it('countdown: Components V2 だが続行案内/ボタンは付かない (黄バー)', () => {
+    const msg = buildTimerEmbedMessage(snap({ phase: 'countdown' }), config);
+    expect(msg.embeds ?? []).toHaveLength(0);
+    expect(Number(msg.flags) & MessageFlags.IsComponentsV2).toBeTruthy();
+
+    const { accentColor, texts, imageUrl, buttons } = containerOf(msg);
+    expect(accentColor).toBe(0xf1c40f); // countdown=黄
+    expect(imageUrl).toBe(`attachment://${TIMER_IMAGE_NAME}`);
+    expect(texts).toEqual(['**Timer**', `-# ${SUMMARY}`]);
+    expect(texts).not.toContain('**続ける場合:**');
+    expect(buttons).toHaveLength(0);
   });
 });

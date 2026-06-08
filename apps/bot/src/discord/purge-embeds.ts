@@ -1,23 +1,26 @@
 import type { Logger } from 'pino';
 
 /**
- * VCテキスト欄から bot 自身が投稿した Embed 付きメッセージを掃除する。
- * 新しい Embed を投稿する直前に呼び出し、テキスト欄に Embed が複数残る事故
+ * VCテキスト欄から bot 自身が投稿した「カード系」メッセージを掃除する。
+ * 新しいカードを投稿する直前に呼び出し、テキスト欄にカードが複数残る事故
  * (bot 異常終了による追跡漏れ、/pomo init 連打、旧VC残骸など) を防ぐ。
  *
+ * 対象は「bot 自身が投稿した・Embed もしくはコンポーネント (ボタン/Components V2 Container)
+ * を含む」メッセージ。スタート Embed・タイマー Embed (work/break) に加え、Components V2 で
+ * 組む最終休憩/カウントダウンのタイマーカード (Embed を持たず Container のみ) も拾えるようにする。
+ *
  * 設計方針:
- * - best-effort。fetch/個別 delete の失敗は warn ログのみで投稿処理は止めない
- *   (掃除が失敗してもメインの Embed 投稿は完遂させる)。
- * - 対象は「bot 自身が投稿した・Embed を含む」メッセージのみ。
- *   他 bot や人間のメッセージ、Embed なしの bot メッセージ (ephemeral 等) は触らない。
- * - fetch 上限 100 件 (Discord API の単発上限)。これで足りない極端な状況は
- *   そもそも運用異常なので別途対応とする。
+ * - best-effort。fetch/個別 delete の失敗は warn ログのみで投稿処理は止めない。
+ * - Embed もコンポーネントも無い bot メッセージ (歓迎/お疲れさまのプレーンテキスト等) は触らない。
+ * - fetch 上限 100 件 (Discord API の単発上限)。これで足りない極端な状況は別途対応。
  */
 /** purge 系が必要とするメッセージの最小形状 (discord.js Message 互換)。 */
 export interface PurgeMessage {
   id: string;
   author: { id: string };
   embeds: readonly unknown[];
+  /** 添付コンポーネント (ボタン行 / Components V2 Container)。V2 タイマーカードの検出に使う。 */
+  components: readonly unknown[];
   content: string;
   delete(): Promise<unknown>;
 }
@@ -39,7 +42,10 @@ export async function purgeOwnEmbeds(
   let collected: { values(): IterableIterator<PurgeMessage> };
   try {
     const messages = await channel.messages.fetch({ limit: 100 });
-    collected = messages.filter((m) => m.author.id === clientUserId && m.embeds.length > 0);
+    // Embed 付き or コンポーネント付き (ボタン / V2 Container) の自分のメッセージを対象にする。
+    collected = messages.filter(
+      (m) => m.author.id === clientUserId && (m.embeds.length > 0 || m.components.length > 0),
+    );
   } catch (err) {
     logger.warn({ err }, 'VCテキスト欄のメッセージ取得に失敗 (Embed掃除をスキップ)');
     return;
