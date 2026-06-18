@@ -68,6 +68,56 @@ sudo apt install -y libsodium-dev ffmpeg fonts-noto-cjk
   インストール後は bot を再起動して `GlobalFonts.has('Noto Sans CJK JP')` の判定を
   更新する必要がある (`timer-image.ts` でモジュール読み込み時に一度だけ判定するため)。
 
+## サーバに導入する時
+
+Discord Developer Portal の OAuth2 → URL Generator でbotの招待URLを生成する。
+このbotは VC 入室・音声再生・メッセージ管理・VC 全員退出を行うため、
+**Guild Install (サーバーへの追加)** で導入する。User Install では Bot Permissions を
+持てず VC 入室・常駐ができないため動作しない。
+
+### 必要な SCOPES (2つ)
+
+- **`bot`**: botをサーバーメンバーとして参加させる
+- **`applications.commands`**: `/pomo` 系スラッシュコマンドを登録・表示する
+  - これが欠けると、botはオンラインになるがコマンド登録 API が `Missing Access (50001)`
+    で弾かれ、`/pomo` がコマンド一覧に一切表示されない
+
+### 必要な BOT PERMISSIONS (7つ)
+
+| 権限 (英語UI表記) | 用途 |
+| ----------------- | ---- |
+| **View Channels** | チャンネル参照 |
+| **Send Messages** | スタート/タイマー Embed・お疲れさま投稿 |
+| **Embed Links** | Embed (円形画像 UI) の表示 |
+| **Manage Messages** | 過去 Embed・案内文の自動削除/再投稿 |
+| **Connect** | VC への入室 |
+| **Speak** | フェーズ切替音・終了演出の再生 |
+| **Move Members** | **終了時の VC 全員強制退出に必須** |
+
+- **Move Members が欠けると終了時の全員退出が黙って失敗する** (warn ログのみ・タイマーは終了)。
+- `permissions` 合計値は **274877934592** (上記7権限の合計)。
+
+### 招待URLの形 (確認用)
+
+```
+https://discord.com/api/oauth2/authorize?client_id=<APPLICATION_ID>&permissions=274877934592&scope=bot+applications.commands
+```
+
+- `scope=bot+applications.commands` の **両方** が入っていること
+- `permissions=274877934592` になっていること
+- `<APPLICATION_ID>` は自分のアプリ ID に置換する
+
+### 導入後の注意
+- /pomoコマンド実行のために最初はpomo-adminロールを付与する。その後pomo-admin以外のロールへ実行権限を付与するためのコマンドがある。
+- Server SettingのIntegrationからpomo-adminロールに権限を付ける
+- 招待後 (またはスコープ追加後) は bot を再起動して `registerCommands` を走らせる。
+  スラッシュコマンドは起動時に参加中の全ギルドへ登録されるため、
+  **プロセス稼働中に新サーバーへ招待しただけではコマンドが登録されない**。
+- 別サーバーへ移設した場合は `config.json` が旧サーバーの `guildId/voiceChannelId` を
+  指したままになる。新サーバーで `/pomo init` を実行して上書きし、bot を再起動すること。
+- Privileged Gateway Intents は不要 (`Guilds`/`GuildMessages`/`GuildVoiceStates` は
+  すべて非特権。Message Content Intent も使わない)。
+
 ## プロジェクトのデプロイ
 
 ### 1. リポジトリのクローン
@@ -193,8 +243,9 @@ journalctl --user -u pomodoro-bot.service -f      # リアルタイム
 journalctl --user -u pomodoro-bot.service -n 100  # 直近100行
 ```
 
-### 停止/再起動
+### 起動/停止/再起動
 ```
+systemctl --user start pomodoro-bot.service
 systemctl --user stop pomodoro-bot.service
 systemctl --user restart pomodoro-bot.service
 ```
