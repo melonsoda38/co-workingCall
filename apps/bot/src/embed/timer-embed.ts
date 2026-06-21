@@ -19,11 +19,11 @@ export const TIMER_IMAGE_NAME = 'timer.png';
 export const CONTINUE_BUTTON_ID = 'pomo_continue';
 
 /** 最終休憩で続行ボタンの上 (画像の下) に太字表示する続行案内テキスト。 */
-export const CONTINUE_PROMPT_TEXT = '続ける場合:';
+export const CONTINUE_PROMPT_TEXT = '作業を続けたい方は「続行」ボタンを押してください';
 
 /**
  * Components V2 で組むフェーズ。
- * finalBreak は「続ける場合:」+続行ボタンを画像の下に置くために V2 Container にする。
+ * finalBreak は続行案内 (CONTINUE_PROMPT_TEXT) + 続行ボタンを画像の下に置くために V2 Container にする。
  * countdown も V2 にする理由: finalBreak→countdown は同一メッセージの edit で遷移するため、
  * V2 メッセージを Embed へ edit で戻せない (IsComponentsV2 は不変)。よって両者を V2 に揃える。
  */
@@ -47,7 +47,7 @@ function buildContinueButton(): ButtonBuilder {
 /**
  * finalBreak / countdown 用の Components V2 Container を組む。
  * 構成 (上から): タイトル → 円形タイマー画像 → 設定サマリ (subtext)
- *   → (finalBreak のみ) 太字「続ける場合:」→ (finalBreak のみ) 続行ボタン。
+ *   → (finalBreak のみ) 太字の続行案内 (CONTINUE_PROMPT_TEXT) → (finalBreak のみ) 続行ボタン。
  * accentColor はフェーズ色 (Embed 左バー相当)。
  */
 function buildTimerContainer(snapshot: TimerSnapshot, config: BotConfig): ContainerBuilder {
@@ -76,7 +76,7 @@ function buildTimerContainer(snapshot: TimerSnapshot, config: BotConfig): Contai
  * - footer: 設定サマリ "作業X分 / 休憩Y分 / Mセット / 最終休憩Z分"
  *
  * finalBreak / countdown: Components V2 Container (buildTimerContainer)。
- * - 画像の下・続行ボタンの上に太字「続ける場合:」を置くため V2 化 (Embed footer は太字不可)。
+ * - 画像の下・続行ボタンの上に太字の続行案内 (CONTINUE_PROMPT_TEXT) を置くため V2 化 (Embed footer は太字不可)。
  *
  * 画像は分刻み更新前提 (TimerEmbedUpdater の間隔 60 秒)。
  * components は **常に明示的に返す** (Embed フェーズは空配列、V2 は Container)。これにより

@@ -1,7 +1,12 @@
 import { ContainerBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
 import { describe, expect, it } from 'vitest';
 import type { BotConfig, TimerSnapshot } from '@co-working-call/shared';
-import { CONTINUE_BUTTON_ID, TIMER_IMAGE_NAME, buildTimerEmbedMessage } from './timer-embed.js';
+import {
+  CONTINUE_BUTTON_ID,
+  CONTINUE_PROMPT_TEXT,
+  TIMER_IMAGE_NAME,
+  buildTimerEmbedMessage,
+} from './timer-embed.js';
 
 const config: BotConfig = {
   default: { workSec: 1500, breakSec: 300, sets: 4, finalBreakSec: 900 },
@@ -72,7 +77,7 @@ describe('buildTimerEmbedMessage', () => {
     expect(msg.components ?? []).toHaveLength(0);
   });
 
-  it('finalBreak: Components V2 で画像の下に太字「続ける場合:」と続行ボタン', () => {
+  it('finalBreak: Components V2 で画像の下に太字の続行案内と続行ボタン', () => {
     const msg = buildTimerEmbedMessage(snap({ phase: 'finalBreak' }), config);
     // V2 メッセージは Embed を持たず、IsComponentsV2 + SuppressNotifications フラグが立つ。
     expect(msg.embeds ?? []).toHaveLength(0);
@@ -83,14 +88,16 @@ describe('buildTimerEmbedMessage', () => {
     expect(accentColor).toBe(0x95a5a6); // finalBreak=グレー
     expect(imageUrl).toBe(`attachment://${TIMER_IMAGE_NAME}`);
     // タイトル・設定サマリ (subtext)・太字の続行案内が、画像の下にこの順で並ぶ。
-    expect(texts).toEqual(['**Timer**', `-# ${SUMMARY}`, '**続ける場合:**']);
+    expect(texts).toEqual(['**Timer**', `-# ${SUMMARY}`, `**${CONTINUE_PROMPT_TEXT}**`]);
     // 続行案内 (太字) は画像 (gallery, index 1) より後・ボタンより前。
     const imageIdx = (msg.components?.[0] as ContainerBuilder)
       .toJSON()
       .components.findIndex((c) => (c as { type: number }).type === 12);
     const promptIdx = (msg.components?.[0] as ContainerBuilder)
       .toJSON()
-      .components.findIndex((c) => (c as { content?: string }).content === '**続ける場合:**');
+      .components.findIndex(
+        (c) => (c as { content?: string }).content === `**${CONTINUE_PROMPT_TEXT}**`,
+      );
     expect(promptIdx).toBeGreaterThan(imageIdx);
 
     expect(buttons).toHaveLength(1);
@@ -107,7 +114,7 @@ describe('buildTimerEmbedMessage', () => {
     expect(accentColor).toBe(0xf1c40f); // countdown=黄
     expect(imageUrl).toBe(`attachment://${TIMER_IMAGE_NAME}`);
     expect(texts).toEqual(['**Timer**', `-# ${SUMMARY}`]);
-    expect(texts).not.toContain('**続ける場合:**');
+    expect(texts).not.toContain(`**${CONTINUE_PROMPT_TEXT}**`);
     expect(buttons).toHaveLength(0);
   });
 });

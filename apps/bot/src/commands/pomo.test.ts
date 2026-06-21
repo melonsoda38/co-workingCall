@@ -195,6 +195,36 @@ describe('handleAdminRole', () => {
       expect.objectContaining({ adminRoleNames: [] }),
     );
   });
+
+  it('remove: 基準ロールも追加ロールが残るなら外せ、残りの先頭を基準に繰り上げる', async () => {
+    vi.mocked(loadConfig).mockResolvedValue({
+      status: 'ok',
+      config: { ...CONFIG, adminRoleNames: ['study-lead'] },
+    });
+    const { interaction } = makeInteraction(['pomo-admin'], ChannelType.GuildVoice, {
+      subcommand: 'remove',
+      roleName: 'pomo-admin',
+    });
+    const { session } = makeSession();
+    await handleAdminRole(interaction, session, 'cfg.json', logger);
+    expect(saveConfig).toHaveBeenCalledWith(
+      'cfg.json',
+      expect.objectContaining({ adminRoleName: 'study-lead', adminRoleNames: [] }),
+    );
+    expect(session.config.adminRoleName).toBe('study-lead');
+  });
+
+  it('remove: 許可ロールが 1 つだけのときは外せず保存しない', async () => {
+    vi.mocked(loadConfig).mockResolvedValue({ status: 'ok', config: { ...CONFIG } });
+    const { interaction, editReply } = makeInteraction(['pomo-admin'], ChannelType.GuildVoice, {
+      subcommand: 'remove',
+      roleName: 'pomo-admin',
+    });
+    const { session } = makeSession();
+    await handleAdminRole(interaction, session, 'cfg.json', logger);
+    expect(editReply).toHaveBeenCalledWith(expect.stringContaining('唯一の許可ロール'));
+    expect(saveConfig).not.toHaveBeenCalled();
+  });
 });
 
 describe('handlePomoInit: Start Embed を EmbedManager に取り込む (設定モーダル再投稿の前提)', () => {

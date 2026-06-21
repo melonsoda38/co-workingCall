@@ -259,9 +259,10 @@ export async function handlePomoStop(
 
 /**
  * /pomo admin-role (add/remove/list) ハンドラ。
- * コマンド実行を許可する追加ロール (config.adminRoleNames) を GUI のロール選択で管理する。
- * 基準ロール (adminRoleName, 既定 pomo-admin) は常に許可で、ここでは外せない。
- * 変更は config.json 保存に加え、稼働中セッションへも即反映する (再起動不要)。
+ * コマンド実行を許可するロール (基準ロール adminRoleName + 追加ロール adminRoleNames) を
+ * GUI のロール選択で管理する。基準ロールも remove 可能だが、許可ロールが 1 つだけのときは
+ * 外せない (誰も操作できなくなるのを防ぐ)。基準ロールを外した場合は残った集合の先頭を
+ * 新しい基準ロールに繰り上げる。変更は config.json 保存に加え稼働中セッションへも即反映 (再起動不要)。
  */
 export async function handleAdminRole(
   interaction: ChatInputCommandInteraction,
@@ -309,27 +310,33 @@ export async function handleAdminRole(
     const loaded = await loadConfig(configPath);
     const base = loaded.status === 'ok' ? loaded.config : session.config;
     const role = interaction.options.getRole('role', true);
-    const names = new Set(base.adminRoleNames);
+    // 許可ロール集合 (基準ロール + 追加ロール、重複除去)。基準ロールは常に先頭。
+    const allowed = buildAllowedRoleNames(base.adminRoleName, base.adminRoleNames);
+    let updated: BotConfig;
 
     if (action === 'add') {
-      if (role.name === base.adminRoleName || names.has(role.name)) {
+      if (allowed.includes(role.name)) {
         await interaction.editReply(`「${role.name}」は既に許可されています`);
         return;
       }
-      names.add(role.name);
+      updated = { ...base, adminRoleNames: [...base.adminRoleNames, role.name] };
     } else {
-      if (role.name === base.adminRoleName) {
-        await interaction.editReply(`「${role.name}」は基準ロールのため外せません`);
-        return;
-      }
-      if (!names.has(role.name)) {
+      if (!allowed.includes(role.name)) {
         await interaction.editReply(`「${role.name}」は許可ロールに登録されていません`);
         return;
       }
-      names.delete(role.name);
+      // 許可ロールが 1 つだけのときは外せない (誰も操作できなくなるのを防ぐ)。
+      if (allowed.length === 1) {
+        await interaction.editReply(
+          `「${role.name}」は唯一の許可ロールのため外せません (最低 1 つは必要です)`,
+        );
+        return;
+      }
+      // 基準ロールを外す場合も含め、残った集合の先頭を新しい基準ロールとして取り直す。
+      // 上の length===1 ガードで残りは必ず 1 つ以上 (default は型確定用の到達不能フォールバック)。
+      const [newBase = base.adminRoleName, ...rest] = allowed.filter((name) => name !== role.name);
+      updated = { ...base, adminRoleName: newBase, adminRoleNames: rest };
     }
-
-    const updated: BotConfig = { ...base, adminRoleNames: [...names] };
     await saveConfig(configPath, updated);
     session.config = updated; // 稼働中セッションへ即反映 (再起動不要)
 
