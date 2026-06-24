@@ -985,6 +985,101 @@ describe('EmbedManager 孤児テキスト掃除 / isEnding (監査観察事項1-
       expect(postedContents(fc)).toContain(FAREWELL_CONTENT);
     });
 
+    /**
+     * #endingDelay を外部から解決できる deferred で差し替えた setup。
+     * #enterContinue の kick 直前グレース (CONTINUE_GRACE_MS) を任意のタイミングで解除でき、
+     * グレース中の遅延登録が残留に反映されるかを検証するために使う。
+     */
+    function setupContinueWithManualGrace() {
+      const fc = fakeChannel();
+      const timer = new FakeTimer();
+      const sound = fakeSound();
+      const ea = fakeEndingActions();
+      let releaseGrace!: () => void;
+      let graceCalls = 0;
+      const m = new EmbedManager({
+        channel: fc.channel,
+        timer,
+        config,
+        logger,
+        soundNotifier: sound.notifier,
+        endingActions: ea.actions,
+        endingDelay: () => {
+          graceCalls += 1;
+          return new Promise<void>((resolve) => {
+            releaseGrace = resolve;
+          });
+        },
+      });
+      return {
+        fc,
+        timer,
+        sound,
+        ea,
+        m,
+        release: () => {
+          releaseGrace();
+        },
+        graceCalls: () => graceCalls,
+      };
+    }
+
+    it('ended 後・kick 前のグレース中に届いた登録も残留に反映される (レース対策の中核)', async () => {
+      const { timer, ea, m, release } = setupContinueWithManualGrace();
+      await reachFinalBreak(timer);
+      // ended 前に u1 が押下。
+      expect(m.registerContinueUser('u1')).toBe('ok');
+      timer.emit('ended', makeSnapshot('ended'));
+      await vi.advanceTimersByTimeAsync(0);
+      // グレース待機中: まだ kick していない。受付は開いたまま (締切前)。
+      expect(ea.kickHumansExcept).not.toHaveBeenCalled();
+      // ended 後にギリギリ届いた u2 の押下もグレース中なら受理される。
+      expect(m.registerContinueUser('u2')).toBe('ok');
+      // グレース解除 → 締切 → kick 実行。except に u1/u2 両方が含まれ、どちらも退出させない。
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(ea.kickHumansExcept).toHaveBeenCalledTimes(1);
+      const except = ea.kickHumansExcept.mock.calls[0]?.[0];
+      expect(except?.has('u1')).toBe(true);
+      expect(except?.has('u2')).toBe(true);
+      // 移行は 1 回のみ (グレースを挟んでも二重 enterContinue しない)。
+      expect(timer.startContinuousCalls).toHaveLength(1);
+    });
+
+    it('グレース中 (#isEnding=true) でも受付は閉じない / 締切後は closed になる', async () => {
+      const { timer, m, release } = setupContinueWithManualGrace();
+      await reachFinalBreak(timer);
+      m.registerContinueUser('u1');
+      timer.emit('ended', makeSnapshot('ended'));
+      await vi.advanceTimersByTimeAsync(0);
+      // #isEnding は終了演出の二重発火ガード用であり、受付締切とは独立。
+      // グレース中 (isEnding=true) でも受付は開いている = #isEnding 単独では閉じない。
+      expect(m.isEnding).toBe(true);
+      expect(m.registerContinueUser('u2')).toBe('ok');
+      // グレース解除で締切 (#continueRegistrationClosed=true) → 以降は closed。
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(m.registerContinueUser('u3')).toBe('closed');
+    });
+
+    it('継続→実終了→新セッションの finalBreak で再び registerContinueUser を受理する', async () => {
+      const { timer, m } = setupContinue();
+      // 1 セッション目: finalBreak → 続行ありで継続移行 → VC 空相当の ended で実終了。
+      await reachFinalBreak(timer);
+      m.registerContinueUser('u1');
+      timer.emit('ended', makeSnapshot('ended'));
+      await vi.advanceTimersByTimeAsync(0);
+      await m.onEnded('normal');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(m.continuousActive).toBe(false);
+      // 2 セッション目: リセットで締切フラグもクリアされ、再び finalBreak で受付可能。
+      timer.emit('phaseChange', makeSnapshot('work'));
+      await vi.advanceTimersByTimeAsync(0);
+      timer.emit('phaseChange', makeSnapshot('finalBreak'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(m.registerContinueUser('u2')).toBe('ok');
+    });
+
     it('セッション開始から23時間で強制終了し timeout メッセージを投稿する', async () => {
       // m は構築時に timer を購読しキャップ closure からも参照されるため未使用で問題ない。
       const { fc, timer, sound, ea } = setupContinue();

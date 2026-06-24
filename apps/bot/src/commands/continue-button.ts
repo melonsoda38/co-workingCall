@@ -1,4 +1,4 @@
-import { ButtonInteraction, MessageFlags } from 'discord.js';
+import { ButtonInteraction, GuildMember, MessageFlags } from 'discord.js';
 import type { Logger } from 'pino';
 import type { VoiceSession } from '../voice/session-registry.js';
 import { isExecutorInTargetVc } from './start-button.js';
@@ -35,7 +35,14 @@ export async function handleContinueButton(
       return;
     }
 
-    const member = await guild.members.fetch(interaction.user.id);
+    // ボタンが見えている最終休憩ギリギリの押下も ended に間に合わせたいので、可能な限り
+    // 同期で処理して登録を急ぐ。interaction.member がキャッシュ済み GuildMember なら
+    // guild.members.fetch の往復遅延を避けられる (US-続行 レース対策)。取得できない場合のみ
+    // 従来どおり fetch にフォールバックする。
+    const member =
+      interaction.member instanceof GuildMember
+        ? interaction.member
+        : await guild.members.fetch(interaction.user.id);
     if (!isExecutorInTargetVc(member.voice.channelId, session.config.voiceChannelId)) {
       await replyEphemeral('VCに参加してから押してください');
       return;

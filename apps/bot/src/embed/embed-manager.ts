@@ -29,6 +29,15 @@ export const FAREWELL_DELETE_DELAY_MS = 15_000;
  */
 export const CONTINUE_MAX_SESSION_MS = 23 * 60 * 60 * 1000;
 
+/**
+ * 「続行」継続移行時、未押下ユーザの強制退出 (kick) 直前に挟むグレース待機 (US-続行)。
+ * 最終休憩終了 (ended) のギリギリに押された続行ボタンは、Discord の配信遅延や
+ * interaction ハンドラの処理遅延で登録 (registerContinueUser) が ended に間に合わない
+ * ことがある。kick 直前まで受付を開いたままこの猶予を挟むことで、遅延した押下も
+ * #continueUserIds に取り込んでから退出判定を確定させ、「押したのに退出させられる」を防ぐ。
+ */
+export const CONTINUE_GRACE_MS = 2_000;
+
 /** onEnded を呼ぶ理由。timeout23h は 23時間キャップ起因 (投稿文言が変わる)。 */
 export type EndingReason = 'normal' | 'timeout23h';
 
@@ -170,6 +179,12 @@ export class EmbedManager {
   #continuousActive = false;
   /** 「続行」を押したユーザ ID 集合。移行時にこの集合以外を強制退出する。 */
   readonly #continueUserIds = new Set<string>();
+  /**
+   * 「続行」受付を締め切ったか (US-続行)。終了演出の二重発火ガード #isEnding とは責務を分け、
+   * 受付の締切は #enterContinue が未押下ユーザを退出させる kick の直前まで開けておく。
+   * これにより ended ギリギリ・グレース中の遅延押下も #continueUserIds に取り込める。
+   */
+  #continueRegistrationClosed = false;
   /** 継続ループで使う作業/休憩秒。セッション開始時 (onTimerStart) に確保する。 */
   #continueWorkSec = 0;
   #continueBreakSec = 0;
@@ -282,7 +297,12 @@ export class EmbedManager {
    * @returns 'ok' (受理) / 'closed' (受付終了: 最終休憩以外・移行済み・終了処理中)
    */
   registerContinueUser(userId: string): 'ok' | 'closed' {
-    if (this.#currentPhase !== 'finalBreak' || this.#continuousActive || this.#isEnding) {
+    // 締切は #continueRegistrationClosed のみで判定する。#isEnding (終了演出の二重発火ガード)
+    // や #continuousActive には依存しない: #enterContinue は移行直後にグレースを挟み kick 直前で
+    // 締め切るため、その間 (#continuousActive=true だが phase は finalBreak のまま) も受付を続け、
+    // ended ギリギリ・グレース中の遅延押下を取り込む。移行完了後は #continueRegistrationClosed
+    // が真、継続ループ中は phase が finalBreak でなくなるため、いずれも 'closed' になる。
+    if (this.#currentPhase !== 'finalBreak' || this.#continueRegistrationClosed) {
       return 'closed';
     }
     this.#continuing = true;
@@ -422,6 +442,13 @@ export class EmbedManager {
     this.#updater?.stop();
     this.#updater = null;
     this.#debouncer.cancel();
+    // kick 直前まで受付を開けておき、グレースを挟む。ended ギリギリやグレース中に届いた
+    // 遅延押下も #continueUserIds に取り込んでから締め切ることで「押したのに退出させられる」
+    // を防ぐ。#continueUserIds は kickHumansExcept に live 参照で渡るため、締切前の add が
+    // そのまま退出除外に反映される (コピーして渡してはならない)。
+    await this.#endingDelay(CONTINUE_GRACE_MS);
+    // ここで受付を締め切り、退出対象集合を確定する (kick ループ中の同時変更を止める)。
+    this.#continueRegistrationClosed = true;
     // 続行を押していない人間のみ強制退出 (押した人は残す)。bot は残留しループを続ける。
     if (this.#endingActions) {
       try {
@@ -613,6 +640,7 @@ export class EmbedManager {
     this.#continuing = false;
     this.#continuousActive = false;
     this.#continueUserIds.clear();
+    this.#continueRegistrationClosed = false;
     this.#clear23hCap();
   }
 
