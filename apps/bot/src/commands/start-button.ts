@@ -83,6 +83,8 @@ export async function handleStartButton(
     const loaded = await loadConfig(configPath);
     const config = loaded.status === 'ok' ? loaded.config : session.config;
     session.embedManager.applyConfig(config);
+    // 音量設定 (音量モーダルの変更) もこのセッションから反映する。
+    session.soundPlayer.setVolumes(config.volumes);
     // 押下されたスタート Embed を削除対象に取り込み、ボタンを ack する。
     session.embedManager.adoptStartEmbed(interaction.message.id);
     await interaction.deferUpdate();

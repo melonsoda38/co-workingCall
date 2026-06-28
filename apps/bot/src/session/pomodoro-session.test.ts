@@ -23,6 +23,7 @@ const config: BotConfig = {
   voiceChannelId: 'vc',
   adminRoleName: 'pomo-admin',
   adminRoleNames: [],
+  volumes: { workEnd: 0, breakEnd: 0, finalStart: 0, countdownWarning: 0, finish: 0 },
 };
 
 function fakeChannel(): EmbedChannel {
@@ -44,7 +45,9 @@ function fakeSoundPlayer() {
   const play = vi.fn<(resource: AudioResourceLike) => void>();
   const stop = vi.fn<(force?: boolean) => boolean>(() => true);
   const player: AudioPlayerLike = { play, stop };
-  const createResource = vi.fn<(filePath: string) => AudioResourceLike>(() => ({}));
+  const createResource = vi.fn<(filePath: string, volumeDb: number) => AudioResourceLike>(
+    () => ({}),
+  );
   const soundPlayer = new SoundPlayer({
     logger,
     soundsDir: '/sounds',
@@ -74,13 +77,13 @@ describe('createPomodoroSession (US-15 フェーズ切替音の統合)', () => {
     expect(createResource).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(1000); // work(1)→break(1)
-    expect(createResource).toHaveBeenLastCalledWith('/sounds/work_end.mp3');
+    expect(createResource).toHaveBeenLastCalledWith('/sounds/work_end.mp3', 0);
 
     await vi.advanceTimersByTimeAsync(1000); // break(1)→work(2)
-    expect(createResource).toHaveBeenLastCalledWith('/sounds/break_end.mp3');
+    expect(createResource).toHaveBeenLastCalledWith('/sounds/break_end.mp3', 0);
 
     await vi.advanceTimersByTimeAsync(1000); // work(2)→finalBreak
-    expect(createResource).toHaveBeenLastCalledWith('/sounds/final_start.mp3');
+    expect(createResource).toHaveBeenLastCalledWith('/sounds/final_start.mp3', 0);
   });
 
   it('timer / soundPlayer / embedManager を束ねて返す', () => {

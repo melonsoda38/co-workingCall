@@ -62,6 +62,7 @@ function makeSession(registerResult: 'ok' | 'closed') {
     voiceChannelId: TARGET_VC,
     adminRoleName: 'pomo-admin',
     adminRoleNames: [],
+    volumes: { workEnd: 0, breakEnd: 0, finalStart: 0, countdownWarning: 0, finish: 0 },
   };
   const session = {
     config,

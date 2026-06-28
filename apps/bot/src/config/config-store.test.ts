@@ -11,6 +11,7 @@ const validConfig: BotConfig = {
   voiceChannelId: '456',
   adminRoleName: 'pomo-admin',
   adminRoleNames: [],
+  volumes: { workEnd: 0, breakEnd: 0, finalStart: 0, countdownWarning: 0, finish: 0 },
 };
 
 describe('config-store', () => {
@@ -68,6 +69,29 @@ describe('config-store', () => {
     expect(r.status).toBe('ok');
     if (r.status === 'ok') {
       expect(r.config.adminRoleName).toBe('pomo-admin');
+    }
+  });
+
+  it('volumes 省略でも全音 0dB で補完される (後方互換)', async () => {
+    const p = join(dir, 'config3.json');
+    const withoutVolumes = {
+      default: validConfig.default,
+      guildId: validConfig.guildId,
+      voiceChannelId: validConfig.voiceChannelId,
+      adminRoleName: 'pomo-admin',
+      adminRoleNames: [],
+    };
+    await writeFile(p, JSON.stringify(withoutVolumes), 'utf8');
+    const r = await loadConfig(p);
+    expect(r.status).toBe('ok');
+    if (r.status === 'ok') {
+      expect(r.config.volumes).toEqual({
+        workEnd: 0,
+        breakEnd: 0,
+        finalStart: 0,
+        countdownWarning: 0,
+        finish: 0,
+      });
     }
   });
 });

@@ -24,7 +24,7 @@ function setup(opts?: { exists?: boolean; throwOnCreate?: boolean }) {
   const stop = vi.fn<(force?: boolean) => boolean>(() => true);
   const player: AudioPlayerLike = { play, stop };
   const createPlayer = vi.fn<() => AudioPlayerLike>(() => player);
-  const createResource = vi.fn<(filePath: string) => AudioResourceLike>(() => {
+  const createResource = vi.fn<(filePath: string, volumeDb: number) => AudioResourceLike>(() => {
     if (opts?.throwOnCreate) {
       throw new Error('resource error');
     }
@@ -62,9 +62,41 @@ describe('SoundPlayer', () => {
     for (const [method, key] of cases) {
       const { sp, play, createResource, resource } = setup();
       (sp[method] as () => void)();
-      expect(createResource).toHaveBeenCalledWith(`${SOUNDS_DIR}/${SOUND_FILES[key]}`);
+      // 既定音量 0dB で対応ファイルの AudioResource を生成する。
+      expect(createResource).toHaveBeenCalledWith(`${SOUNDS_DIR}/${SOUND_FILES[key]}`, 0);
       expect(play).toHaveBeenCalledWith(resource);
     }
+  });
+
+  it('setVolumes で設定した dB が createResource に渡る (指定キーのみ更新)', () => {
+    const { sp, createResource } = setup();
+    sp.setVolumes({ workEnd: -10, finish: 5 });
+    sp.playWorkEnd();
+    sp.playFinish();
+    sp.playBreakEnd(); // 未設定キーは 0 のまま。
+    expect(createResource).toHaveBeenCalledWith(`${SOUNDS_DIR}/${SOUND_FILES.workEnd}`, -10);
+    expect(createResource).toHaveBeenCalledWith(`${SOUNDS_DIR}/${SOUND_FILES.finish}`, 5);
+    expect(createResource).toHaveBeenCalledWith(`${SOUNDS_DIR}/${SOUND_FILES.breakEnd}`, 0);
+  });
+
+  it('コンストラクタ volumes で初期音量を設定できる', () => {
+    const resource: AudioResourceLike = {};
+    const createResource = vi.fn<(filePath: string, volumeDb: number) => AudioResourceLike>(
+      () => resource,
+    );
+    const sp = new SoundPlayer({
+      logger,
+      soundsDir: SOUNDS_DIR,
+      createPlayer: () => ({ play: vi.fn(), stop: vi.fn(() => true) }),
+      createResource,
+      fileExists: () => true,
+      volumes: { countdownWarning: -20 },
+    });
+    sp.playCountdownWarning();
+    expect(createResource).toHaveBeenCalledWith(
+      `${SOUNDS_DIR}/${SOUND_FILES.countdownWarning}`,
+      -20,
+    );
   });
 
   it('音源が無いときは warn を出し再生しない', () => {

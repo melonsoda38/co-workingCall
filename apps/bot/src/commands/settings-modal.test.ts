@@ -103,6 +103,7 @@ describe('handleSettingsModalSubmit (Start Embed 投稿し直し結線)', () => 
     voiceChannelId: 'vc',
     adminRoleName: 'pomo-admin',
     adminRoleNames: [],
+    volumes: { workEnd: 0, breakEnd: 0, finalStart: 0, countdownWarning: 0, finish: 0 },
   };
 
   beforeEach(async () => {
@@ -282,6 +283,7 @@ describe('handleSettingsButton (Start Embed 取り込み結線)', () => {
     voiceChannelId: 'vc',
     adminRoleName: 'pomo-admin',
     adminRoleNames: [],
+    volumes: { workEnd: 0, breakEnd: 0, finalStart: 0, countdownWarning: 0, finish: 0 },
   };
 
   beforeEach(async () => {

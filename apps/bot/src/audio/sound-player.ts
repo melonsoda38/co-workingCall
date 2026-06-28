@@ -46,10 +46,12 @@ export interface SoundPlayerDeps {
   soundsDir?: string;
   /** AudioPlayer を生成する (本番は @discordjs/voice、テストはモック)。 */
   createPlayer: () => AudioPlayerLike;
-  /** ファイルパスから AudioResource を生成する。 */
-  createResource: (filePath: string) => AudioResourceLike;
+  /** ファイルパスと音量補正 (dB) から AudioResource を生成する。 */
+  createResource: (filePath: string, volumeDb: number) => AudioResourceLike;
   /** ファイル存在判定 (テスト差し替え用、既定は fs.existsSync)。 */
   fileExists?: (filePath: string) => boolean;
+  /** 各音の初期音量補正 (dB)。未指定キーは 0 (原音)。後から setVolumes で更新できる。 */
+  volumes?: Partial<Record<SoundKey, number>>;
 }
 
 /** 同梱音源ディレクトリ (dist/audio/ から見た apps/bot/assets/sounds)。 */
@@ -67,9 +69,17 @@ function defaultSoundsDir(): string {
 export class SoundPlayer implements PhaseSoundNotifier {
   readonly #logger: Logger;
   readonly #soundsDir: string;
-  readonly #createResource: (filePath: string) => AudioResourceLike;
+  readonly #createResource: (filePath: string, volumeDb: number) => AudioResourceLike;
   readonly #fileExists: (filePath: string) => boolean;
   readonly #player: AudioPlayerLike;
+  /** 各音の音量補正 (dB)。既定は全て 0 (原音)。setVolumes で更新する。 */
+  readonly #volumes: Record<SoundKey, number> = {
+    workEnd: 0,
+    breakEnd: 0,
+    finalStart: 0,
+    countdownWarning: 0,
+    finish: 0,
+  };
 
   constructor(deps: SoundPlayerDeps) {
     this.#logger = deps.logger;
@@ -77,6 +87,22 @@ export class SoundPlayer implements PhaseSoundNotifier {
     this.#createResource = deps.createResource;
     this.#fileExists = deps.fileExists ?? ((filePath) => existsSync(filePath));
     this.#player = deps.createPlayer();
+    if (deps.volumes) {
+      this.setVolumes(deps.volumes);
+    }
+  }
+
+  /**
+   * 各音の音量補正 (dB) を更新する。指定されたキーのみ上書きする (未指定は据え置き)。
+   * 反映は次の再生から (再生時に createResource へ dB を渡す)。
+   */
+  setVolumes(volumes: Partial<Record<SoundKey, number>>): void {
+    for (const key of Object.keys(this.#volumes) as SoundKey[]) {
+      const db = volumes[key];
+      if (typeof db === 'number') {
+        this.#volumes[key] = db;
+      }
+    }
   }
 
   /** bot 入室時に VC 接続へ player を購読させる (audio-spec init)。 */
@@ -116,8 +142,9 @@ export class SoundPlayer implements PhaseSoundNotifier {
       return;
     }
     try {
-      this.#logger.debug({ key, filePath }, '通知音を再生します');
-      const resource = this.#createResource(filePath);
+      const volumeDb = this.#volumes[key];
+      this.#logger.debug({ key, filePath, volumeDb }, '通知音を再生します');
+      const resource = this.#createResource(filePath, volumeDb);
       this.#player.play(resource); // 多重再生は上書き (audio-spec)
     } catch (err) {
       this.#logger.error({ err, key, filePath }, '通知音の再生に失敗しました');

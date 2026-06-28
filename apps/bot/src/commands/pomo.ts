@@ -135,6 +135,14 @@ export async function handlePomoInit(
       voiceChannelId: channel.id,
       adminRoleName,
       adminRoleNames,
+      // 既存の音量設定は維持。新規は全音 0dB (原音)。
+      volumes: existingConfig?.volumes ?? {
+        workEnd: 0,
+        breakEnd: 0,
+        finalStart: 0,
+        countdownWarning: 0,
+        finish: 0,
+      },
     };
     await saveConfig(configPath, config);
     // 新規スタート Embed 投稿の直前に、対象 VC テキスト欄から bot 自身の過去 Embed を掃除

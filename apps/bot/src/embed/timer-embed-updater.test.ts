@@ -15,6 +15,7 @@ const config: BotConfig = {
   voiceChannelId: 'v',
   adminRoleName: 'pomo-admin',
   adminRoleNames: [],
+  volumes: { workEnd: 0, breakEnd: 0, finalStart: 0, countdownWarning: 0, finish: 0 },
 };
 
 function makeSnapshot(phase: TimerSnapshot['phase'], remainingMs = 60_000): TimerSnapshot {

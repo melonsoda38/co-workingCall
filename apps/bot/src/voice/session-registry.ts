@@ -1,4 +1,5 @@
 import type { BotConfig } from '@co-working-call/shared';
+import type { SoundPlayer } from '../audio/sound-player.js';
 import type { EmbedManager } from '../embed/embed-manager.js';
 import type { PomodoroTimer } from '../timer/pomodoro-timer.js';
 import type { VoiceManager } from './voice-manager.js';
@@ -12,6 +13,8 @@ export interface VoiceSession {
   timer: PomodoroTimer;
   embedManager: EmbedManager;
   voiceManager: VoiceManager;
+  /** 通知音プレイヤー。音量設定の反映 (setVolumes) をセッション開始時に行う。 */
+  soundPlayer: SoundPlayer;
 }
 
 /** guildId をキーにしたセッションの登録簿。 */

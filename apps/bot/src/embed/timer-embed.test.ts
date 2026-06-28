@@ -14,6 +14,7 @@ const config: BotConfig = {
   voiceChannelId: 'v',
   adminRoleName: 'pomo-admin',
   adminRoleNames: [],
+  volumes: { workEnd: 0, breakEnd: 0, finalStart: 0, countdownWarning: 0, finish: 0 },
 };
 
 const SUMMARY = '作業25分 / 休憩5分 / 4セット / 最終休憩15分';

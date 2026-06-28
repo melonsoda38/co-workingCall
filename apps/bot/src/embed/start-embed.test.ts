@@ -10,6 +10,7 @@ import type { BotConfig } from '@co-working-call/shared';
 import {
   SETTINGS_BUTTON_ID,
   START_BUTTON_ID,
+  VOLUME_BUTTON_ID,
   buildStartEmbedMessage,
   formatConfigSummary,
 } from './start-embed.js';
@@ -20,6 +21,7 @@ const config: BotConfig = {
   voiceChannelId: 'v',
   adminRoleName: 'pomo-admin',
   adminRoleNames: [],
+  volumes: { workEnd: 0, breakEnd: 0, finalStart: 0, countdownWarning: 0, finish: 0 },
 };
 
 describe('formatConfigSummary', () => {
@@ -47,12 +49,12 @@ describe('buildStartEmbedMessage', () => {
     expect(msg.flags).toBe(MessageFlags.SuppressNotifications);
   });
 
-  it('開始/設定ボタンの custom_id・style', () => {
+  it('開始/設定/音量ボタンの custom_id・style', () => {
     const msg = buildStartEmbedMessage(config);
     const row = msg.components?.[0];
     expect(row).toBeInstanceOf(ActionRowBuilder);
     const json = (row as ActionRowBuilder<ButtonBuilder>).toJSON();
-    expect(json.components).toHaveLength(2);
+    expect(json.components).toHaveLength(3);
     expect(json.components[0]).toMatchObject({
       custom_id: START_BUTTON_ID,
       style: ButtonStyle.Primary,
@@ -60,6 +62,12 @@ describe('buildStartEmbedMessage', () => {
     expect(json.components[1]).toMatchObject({
       custom_id: SETTINGS_BUTTON_ID,
       style: ButtonStyle.Secondary,
+      label: '⚙️: ⏰',
+    });
+    expect(json.components[2]).toMatchObject({
+      custom_id: VOLUME_BUTTON_ID,
+      style: ButtonStyle.Secondary,
+      label: '⚙️: 🔊',
     });
   });
 });

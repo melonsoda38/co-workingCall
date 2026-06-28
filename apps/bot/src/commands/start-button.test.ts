@@ -65,26 +65,30 @@ function makeSession(opts?: {
   ensureConnected: ReturnType<typeof vi.fn>;
   applyConfig: ReturnType<typeof vi.fn>;
   adoptStartEmbed: ReturnType<typeof vi.fn>;
+  setVolumes: ReturnType<typeof vi.fn>;
 } {
   const start = vi.fn();
   const getSnapshot = vi.fn(() => snapshot(opts?.phase ?? 'idle'));
   const ensureConnected = vi.fn(() => Promise.resolve(opts?.connected ?? true));
   const applyConfig = vi.fn();
   const adoptStartEmbed = vi.fn();
+  const setVolumes = vi.fn();
   const config: BotConfig = {
     default: DEFAULT_TIMER,
     guildId: 'guild-1',
     voiceChannelId: TARGET_VC,
     adminRoleName: 'pomo-admin',
     adminRoleNames: [],
+    volumes: { workEnd: 0, breakEnd: 0, finalStart: 0, countdownWarning: 0, finish: 0 },
   };
   const session = {
     config,
     timer: { getSnapshot, start },
     embedManager: { applyConfig, adoptStartEmbed, isEnding: opts?.isEnding ?? false },
     voiceManager: { ensureConnected },
+    soundPlayer: { setVolumes },
   } as unknown as VoiceSession;
-  return { session, start, ensureConnected, applyConfig, adoptStartEmbed };
+  return { session, start, ensureConnected, applyConfig, adoptStartEmbed, setVolumes };
 }
 
 describe('isExecutorInTargetVc', () => {
@@ -106,6 +110,7 @@ describe('handleStartButton', () => {
         voiceChannelId: TARGET_VC,
         adminRoleName: 'pomo-admin',
         adminRoleNames: [],
+        volumes: { workEnd: -10, breakEnd: 0, finalStart: 0, countdownWarning: 0, finish: 5 },
       },
     });
   });
@@ -194,5 +199,20 @@ describe('handleStartButton', () => {
     expect(adoptStartEmbed).toHaveBeenCalledWith('clicked-start-embed');
     expect(deferUpdate).toHaveBeenCalledTimes(1);
     expect(start).toHaveBeenCalledWith(DEFAULT_TIMER);
+  });
+
+  it('正常系: セッション開始時に config.json の最新音量で soundPlayer.setVolumes する', async () => {
+    const { interaction } = makeInteraction({ memberVcId: TARGET_VC });
+    const { session, setVolumes } = makeSession();
+    await handleStartButton(interaction, session, 'cfg.json', logger);
+
+    // loadConfig モックの volumes (workEnd:-10, finish:5) がそのまま反映される。
+    expect(setVolumes).toHaveBeenCalledWith({
+      workEnd: -10,
+      breakEnd: 0,
+      finalStart: 0,
+      countdownWarning: 0,
+      finish: 5,
+    });
   });
 });

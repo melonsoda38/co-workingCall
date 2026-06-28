@@ -105,6 +105,8 @@ export async function setupVoiceFeature(
   }
 
   const soundPlayer = createDiscordSoundPlayer(logger);
+  // 起動時点の音量設定 (config.volumes) を反映する。以降は ▶開始のたびに最新値へ更新される。
+  soundPlayer.setVolumes(config.volumes);
   // VoiceManager と EmbedManager は相互参照する (endingActions.disconnectBot →
   // voiceManager.forceDisconnect)。順序解決のため ref オブジェクトで遅延参照する。
   // 実行時 (onEnded 発火時) には voiceManagerRef.current が代入済みで安全。
@@ -152,6 +154,7 @@ export async function setupVoiceFeature(
     timer: session.timer,
     embedManager: session.embedManager,
     voiceManager,
+    soundPlayer,
   });
 
   // 起動時点の人間数を反映 (既に人がいれば入室する)。

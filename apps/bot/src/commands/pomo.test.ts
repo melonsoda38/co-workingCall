@@ -22,6 +22,7 @@ const CONFIG: BotConfig = {
   voiceChannelId: 'vc-1',
   adminRoleName: 'pomo-admin',
   adminRoleNames: [],
+  volumes: { workEnd: 0, breakEnd: 0, finalStart: 0, countdownWarning: 0, finish: 0 },
 };
 
 function makeInteraction(

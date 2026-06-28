@@ -34,7 +34,15 @@ export function createDiscordSoundPlayer(logger: Logger, soundsDir?: string): So
       });
       return player;
     },
-    createResource: (filePath) =>
-      createAudioResource(filePath, { inputType: StreamType.Arbitrary }),
+    createResource: (filePath, volumeDb) => {
+      // inlineVolume: true で AudioResource.volume を有効化し、dB 補正をかける。
+      // 0dB なら原音そのまま。正方向は増幅 (音源が大きいとクリッピングし得る)。
+      const resource = createAudioResource(filePath, {
+        inputType: StreamType.Arbitrary,
+        inlineVolume: true,
+      });
+      resource.volume?.setVolumeDecibels(volumeDb);
+      return resource;
+    },
   });
 }

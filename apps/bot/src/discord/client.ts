@@ -2,6 +2,7 @@ import { Client, Events, GatewayIntentBits } from 'discord.js';
 import type { Logger } from 'pino';
 import {
   SETTINGS_MODAL_ID,
+  VOLUME_MODAL_ID,
   handleAdminRole,
   handleContinueButton,
   handlePomoInit,
@@ -9,6 +10,8 @@ import {
   handleSettingsButton,
   handleSettingsModalSubmit,
   handleStartButton,
+  handleVolumeButton,
+  handleVolumeModalSubmit,
   registerCommands,
 } from '../commands/index.js';
 import { loadConfig } from '../config/index.js';
@@ -16,6 +19,7 @@ import {
   CONTINUE_BUTTON_ID,
   SETTINGS_BUTTON_ID,
   START_BUTTON_ID,
+  VOLUME_BUTTON_ID,
   shouldHandleHumanMessage,
 } from '../embed/index.js';
 import {
@@ -103,6 +107,16 @@ export async function startBot(token: string, logger: Logger, configPath: string
     if (interaction.isModalSubmit() && interaction.customId === SETTINGS_MODAL_ID) {
       const session = interaction.guildId ? sessions.get(interaction.guildId) : undefined;
       void handleSettingsModalSubmit(interaction, session, configPath, logger);
+      return;
+    }
+    if (interaction.isButton() && interaction.customId === VOLUME_BUTTON_ID) {
+      const session = interaction.guildId ? sessions.get(interaction.guildId) : undefined;
+      void handleVolumeButton(interaction, session, configPath, logger);
+      return;
+    }
+    if (interaction.isModalSubmit() && interaction.customId === VOLUME_MODAL_ID) {
+      const session = interaction.guildId ? sessions.get(interaction.guildId) : undefined;
+      void handleVolumeModalSubmit(interaction, session, configPath, logger);
       return;
     }
   });

@@ -10,6 +10,7 @@ import type { BotConfig } from '@co-working-call/shared';
 
 export const START_BUTTON_ID = 'pomo_start';
 export const SETTINGS_BUTTON_ID = 'pomo_settings_open';
+export const VOLUME_BUTTON_ID = 'pomo_volume_open';
 
 /** 設定を embed-spec §1 の1行表記にする (例: 作業25分 / 休憩5分 / 4セット / 最終休憩15分)。 */
 export function formatConfigSummary(config: BotConfig): string {
@@ -38,7 +39,11 @@ export function buildStartEmbedMessage(config: BotConfig): MessageCreateOptions 
     new ButtonBuilder()
       .setCustomId(SETTINGS_BUTTON_ID)
       .setStyle(ButtonStyle.Secondary)
-      .setEmoji('⚙️'),
+      .setLabel('⚙️: ⏰'),
+    new ButtonBuilder()
+      .setCustomId(VOLUME_BUTTON_ID)
+      .setStyle(ButtonStyle.Secondary)
+      .setLabel('⚙️: 🔊'),
   );
 
   return {
