@@ -16,6 +16,7 @@ import {
   BREAK_MIN_ID,
   SETS_ID,
   FINAL_MIN_ID,
+  AUTO_START_TIME_ID,
 } from './settings-modal.js';
 
 describe('parseSettingsModalInput', () => {
@@ -25,20 +26,34 @@ describe('parseSettingsModalInput', () => {
       breakMin: '5',
       sets: '4',
       finalMin: '15',
+      autoStartTime: '',
     });
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.timer).toEqual({ workSec: 1500, breakSec: 300, sets: 4, finalBreakSec: 900 });
+      expect(r.autoStartTime).toBeNull();
     }
   });
 
   it('境界値 (最小・最大) を受理する', () => {
     expect(
-      parseSettingsModalInput({ workMin: '1', breakMin: '1', sets: '1', finalMin: '1' }).ok,
+      parseSettingsModalInput({
+        workMin: '1',
+        breakMin: '1',
+        sets: '1',
+        finalMin: '1',
+        autoStartTime: '',
+      }).ok,
     ).toBe(true);
     // 最大はすべて 999。
     expect(
-      parseSettingsModalInput({ workMin: '999', breakMin: '999', sets: '999', finalMin: '999' }).ok,
+      parseSettingsModalInput({
+        workMin: '999',
+        breakMin: '999',
+        sets: '999',
+        finalMin: '999',
+        autoStartTime: '',
+      }).ok,
     ).toBe(true);
   });
 
@@ -48,6 +63,7 @@ describe('parseSettingsModalInput', () => {
       breakMin: '1000',
       sets: '1000',
       finalMin: '0',
+      autoStartTime: '',
     });
     expect(r.ok).toBe(false);
     if (!r.ok) {
@@ -60,30 +76,92 @@ describe('parseSettingsModalInput', () => {
 
   it('非整数・空・非数値を拒否する', () => {
     expect(
-      parseSettingsModalInput({ workMin: '2.5', breakMin: '5', sets: '4', finalMin: '15' }).ok,
+      parseSettingsModalInput({
+        workMin: '2.5',
+        breakMin: '5',
+        sets: '4',
+        finalMin: '15',
+        autoStartTime: '',
+      }).ok,
     ).toBe(false);
     expect(
-      parseSettingsModalInput({ workMin: '', breakMin: '5', sets: '4', finalMin: '15' }).ok,
+      parseSettingsModalInput({
+        workMin: '',
+        breakMin: '5',
+        sets: '4',
+        finalMin: '15',
+        autoStartTime: '',
+      }).ok,
     ).toBe(false);
     expect(
-      parseSettingsModalInput({ workMin: 'abc', breakMin: '5', sets: '4', finalMin: '15' }).ok,
+      parseSettingsModalInput({
+        workMin: 'abc',
+        breakMin: '5',
+        sets: '4',
+        finalMin: '15',
+        autoStartTime: '',
+      }).ok,
     ).toBe(false);
+  });
+
+  it('自動スタート時刻: 有効な HH:MM を受理し、空欄は null、不正形式は拒否する', () => {
+    const valid = parseSettingsModalInput({
+      workMin: '25',
+      breakMin: '5',
+      sets: '4',
+      finalMin: '15',
+      autoStartTime: '07:30',
+    });
+    expect(valid.ok).toBe(true);
+    if (valid.ok) {
+      expect(valid.autoStartTime).toBe('07:30');
+    }
+
+    // 前後の空白は許容してトリムする。
+    const trimmed = parseSettingsModalInput({
+      workMin: '25',
+      breakMin: '5',
+      sets: '4',
+      finalMin: '15',
+      autoStartTime: ' 23:59 ',
+    });
+    expect(trimmed.ok).toBe(true);
+    if (trimmed.ok) {
+      expect(trimmed.autoStartTime).toBe('23:59');
+    }
+
+    for (const bad of ['7:30', '24:00', '12:60', '0730', 'ab:cd']) {
+      const r = parseSettingsModalInput({
+        workMin: '25',
+        breakMin: '5',
+        sets: '4',
+        finalMin: '15',
+        autoStartTime: bad,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.errors).toContain('自動スタート時刻はHH:MM形式（例 07:30）で入力してください');
+      }
+    }
   });
 });
 
 describe('buildSettingsModal', () => {
-  it('custom_id とタイトル・4フィールドを持つ', () => {
-    const modal = buildSettingsModal({
-      workSec: 1500,
-      breakSec: 300,
-      sets: 4,
-      finalBreakSec: 900,
-    });
+  it('custom_id とタイトル・5フィールドを持つ', () => {
+    const modal = buildSettingsModal(
+      {
+        workSec: 1500,
+        breakSec: 300,
+        sets: 4,
+        finalBreakSec: 900,
+      },
+      null,
+    );
     expect(modal).toBeInstanceOf(ModalBuilder);
     const json = modal.toJSON();
     expect(json.custom_id).toBe(SETTINGS_MODAL_ID);
     expect(json.title).toBe('🍅 タイマー設定');
-    expect(json.components).toHaveLength(4);
+    expect(json.components).toHaveLength(5);
   });
 });
 
@@ -104,6 +182,7 @@ describe('handleSettingsModalSubmit (Start Embed 投稿し直し結線)', () => 
     adminRoleName: 'pomo-admin',
     adminRoleNames: [],
     volumes: { workEnd: 0, breakEnd: 0, finalStart: 0, countdownWarning: 0, finish: 0 },
+    autoStart: { time: null, label: '自動スタート' },
   };
 
   beforeEach(async () => {
@@ -126,6 +205,7 @@ describe('handleSettingsModalSubmit (Start Embed 投稿し直し結線)', () => 
     breakMin: string;
     sets: string;
     finalMin: string;
+    autoStartTime?: string;
   }) {
     const reply = vi.fn<(options: ReplyOptions) => Promise<void>>(() => Promise.resolve());
     const deleteReply = vi.fn<() => Promise<void>>(() => Promise.resolve());
@@ -134,6 +214,7 @@ describe('handleSettingsModalSubmit (Start Embed 投稿し直し結線)', () => 
       [BREAK_MIN_ID]: fields.breakMin,
       [SETS_ID]: fields.sets,
       [FINAL_MIN_ID]: fields.finalMin,
+      [AUTO_START_TIME_ID]: fields.autoStartTime ?? '',
     };
     return {
       fields: {
@@ -148,10 +229,12 @@ describe('handleSettingsModalSubmit (Start Embed 投稿し直し結線)', () => 
 
   function makeSession(repostImpl: (config: BotConfig) => Promise<void> = () => Promise.resolve()) {
     const repostStartEmbed = vi.fn(repostImpl);
+    const schedule = vi.fn<(time: string | null) => void>();
     const session = {
       embedManager: { repostStartEmbed },
+      autoStartScheduler: { schedule },
     } as unknown as VoiceSession;
-    return { session, repostStartEmbed };
+    return { session, repostStartEmbed, schedule };
   }
 
   it('検証成功時: reply 後に repostStartEmbed を最新 config で呼ぶ', async () => {
@@ -187,6 +270,60 @@ describe('handleSettingsModalSubmit (Start Embed 投稿し直し結線)', () => 
     // config.json も実際に上書きされている (再投稿に渡される config と整合)。
     const saved = JSON.parse(await readFile(configPath, 'utf-8')) as BotConfig;
     expect(saved.default).toEqual(passed?.default);
+  });
+
+  it('自動スタート時刻を config.autoStart.time に保存しスケジューラを再武装する', async () => {
+    const interaction = makeInteraction({
+      workMin: '25',
+      breakMin: '5',
+      sets: '4',
+      finalMin: '15',
+      autoStartTime: '08:00',
+    });
+    const { session, schedule } = makeSession();
+
+    await handleSettingsModalSubmit(
+      interaction as unknown as Parameters<typeof handleSettingsModalSubmit>[0],
+      session,
+      configPath,
+      logger,
+    );
+
+    const saved = JSON.parse(await readFile(configPath, 'utf-8')) as BotConfig;
+    expect(saved.autoStart.time).toBe('08:00');
+    // 既存ラベルは保持される。
+    expect(saved.autoStart.label).toBe('自動スタート');
+    expect(schedule).toHaveBeenCalledWith('08:00');
+  });
+
+  it('時刻を空欄で送信すると自動スタートを無効化 (time=null) しスケジューラも無効化する', async () => {
+    // 既存 config に時刻が入っている状態から空欄送信で無効化できることを確認する。
+    await writeFile(
+      configPath,
+      JSON.stringify({ ...initialConfig, autoStart: { time: '09:00', label: '朝活' } }),
+      'utf-8',
+    );
+    const interaction = makeInteraction({
+      workMin: '25',
+      breakMin: '5',
+      sets: '4',
+      finalMin: '15',
+      autoStartTime: '',
+    });
+    const { session, schedule } = makeSession();
+
+    await handleSettingsModalSubmit(
+      interaction as unknown as Parameters<typeof handleSettingsModalSubmit>[0],
+      session,
+      configPath,
+      logger,
+    );
+
+    const saved = JSON.parse(await readFile(configPath, 'utf-8')) as BotConfig;
+    expect(saved.autoStart.time).toBeNull();
+    // ラベルは保持される。
+    expect(saved.autoStart.label).toBe('朝活');
+    expect(schedule).toHaveBeenCalledWith(null);
   });
 
   it('検証失敗時: repostStartEmbed は呼ばず エラー文言を ephemeral で返す', async () => {
@@ -284,6 +421,7 @@ describe('handleSettingsButton (Start Embed 取り込み結線)', () => {
     adminRoleName: 'pomo-admin',
     adminRoleNames: [],
     volumes: { workEnd: 0, breakEnd: 0, finalStart: 0, countdownWarning: 0, finish: 0 },
+    autoStart: { time: null, label: '自動スタート' },
   };
 
   beforeEach(async () => {

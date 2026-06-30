@@ -32,18 +32,16 @@ const DEFAULT_VOLUMES: VolumeConfig = {
 };
 
 function volumeField(id: string, labelText: string, value: number): LabelBuilder {
-  return new LabelBuilder()
-    .setLabel(labelText)
-    .setTextInputComponent(
-      new TextInputBuilder()
-        .setCustomId(id)
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true)
-        .setMinLength(1)
-        // "-50" の 3 文字を許容。
-        .setMaxLength(3)
-        .setValue(String(value)),
-    );
+  return new LabelBuilder().setLabel(labelText).setTextInputComponent(
+    new TextInputBuilder()
+      .setCustomId(id)
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true)
+      .setMinLength(1)
+      // "-50" の 3 文字を許容。
+      .setMaxLength(3)
+      .setValue(String(value)),
+  );
 }
 
 /**

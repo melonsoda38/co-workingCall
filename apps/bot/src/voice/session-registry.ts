@@ -1,4 +1,5 @@
 import type { BotConfig } from '@co-working-call/shared';
+import type { AutoStartScheduler } from '../auto-start/scheduler.js';
 import type { SoundPlayer } from '../audio/sound-player.js';
 import type { EmbedManager } from '../embed/embed-manager.js';
 import type { PomodoroTimer } from '../timer/pomodoro-timer.js';
@@ -15,6 +16,8 @@ export interface VoiceSession {
   voiceManager: VoiceManager;
   /** 通知音プレイヤー。音量設定の反映 (setVolumes) をセッション開始時に行う。 */
   soundPlayer: SoundPlayer;
+  /** 指定時刻による毎日の自動スタートを管理するスケジューラ。 */
+  autoStartScheduler: AutoStartScheduler;
 }
 
 /** guildId をキーにしたセッションの登録簿。 */

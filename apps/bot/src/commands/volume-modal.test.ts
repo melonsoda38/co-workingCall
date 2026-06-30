@@ -70,9 +70,7 @@ describe('parseVolumeModalInput', () => {
   });
 
   it('非整数・空・非数値を拒否する', () => {
-    expect(
-      parseVolumeModalInput({ ...strAll('0'), workEnd: '2.5' }).ok,
-    ).toBe(false);
+    expect(parseVolumeModalInput({ ...strAll('0'), workEnd: '2.5' }).ok).toBe(false);
     expect(parseVolumeModalInput({ ...strAll('0'), workEnd: '' }).ok).toBe(false);
     expect(parseVolumeModalInput({ ...strAll('0'), workEnd: 'abc' }).ok).toBe(false);
   });
@@ -115,6 +113,7 @@ describe('handleVolumeModalSubmit', () => {
     adminRoleName: 'pomo-admin',
     adminRoleNames: [],
     volumes: ZERO,
+    autoStart: { time: null, label: '自動スタート' },
   };
 
   beforeEach(async () => {
@@ -246,6 +245,7 @@ describe('handleVolumeButton', () => {
     adminRoleName: 'pomo-admin',
     adminRoleNames: [],
     volumes: { ...ZERO, workEnd: -8 },
+    autoStart: { time: null, label: '自動スタート' },
   };
 
   beforeEach(async () => {

@@ -21,6 +21,7 @@ const config: BotConfig = {
   adminRoleName: 'pomo-admin',
   adminRoleNames: [],
   volumes: { workEnd: 0, breakEnd: 0, finalStart: 0, countdownWarning: 0, finish: 0 },
+  autoStart: { time: null, label: '自動スタート' },
 };
 
 function makeSnapshot(phase: TimerSnapshot['phase']): TimerSnapshot {
@@ -1104,6 +1105,50 @@ describe('EmbedManager 孤児テキスト掃除 / isEnding (監査観察事項1-
       expect(ea.kickAllHumans).toHaveBeenCalledTimes(1);
       expect(ea.disconnectBot).toHaveBeenCalledTimes(1);
       expect(postedContents(fc)).toContain(TIMEOUT_CONTENT);
+    });
+  });
+
+  describe('自動スタート (resetForRestart / postAutoStartResetNotice)', () => {
+    it('postAutoStartResetNotice はラベル入りのお知らせを投稿する', async () => {
+      const { channel, post } = fakeChannel();
+      const m = new EmbedManager({ channel, timer: new FakeTimer(), config, logger });
+      await m.postAutoStartResetNotice('朝活');
+      expect(post).toHaveBeenCalledTimes(1);
+      const content = (post.mock.calls[0]?.[0] as { content?: string }).content;
+      expect(content).toBe(
+        '失礼します。朝活の時間になりましたのでタイマーをリセットしてから朝活を開始します',
+      );
+    });
+
+    it('resetForRestart はタイマー Embed を消し timer をリセットするがスタート Embed は出さない', async () => {
+      const { channel, post, del } = fakeChannel();
+      const timer = new FakeTimer();
+      const m = new EmbedManager({
+        channel,
+        timer,
+        config,
+        logger,
+        endingDelay: () => Promise.resolve(),
+      });
+      // 稼働状態を作る (onIdle → work でタイマー Embed を投稿)。
+      await m.onIdle();
+      timer.emit('phaseChange', makeSnapshot('work'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(m.timerEmbedId).not.toBeNull();
+      const postsBefore = post.mock.calls.length;
+      const resetBefore = timer.resetCallCount;
+
+      await m.resetForRestart();
+
+      // タイマー Embed は削除され、追跡 id はクリアされる。
+      expect(del).toHaveBeenCalled();
+      expect(m.timerEmbedId).toBeNull();
+      // timer.reset が呼ばれ idle へ戻る。
+      expect(timer.resetCallCount).toBe(resetBefore + 1);
+      expect(timer.getSnapshot().phase).toBe('idle');
+      // 新スタート Embed は投稿しない (直後に timer.start する前提)。
+      expect(post.mock.calls.length).toBe(postsBefore);
+      expect(m.startEmbedId).toBeNull();
     });
   });
 });

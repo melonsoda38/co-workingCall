@@ -6,6 +6,7 @@ import { buildTimerEmbedContent, buildTimerEmbedMessage } from './timer-embed.js
 import { RepostDebouncer } from './repost-debouncer.js';
 import { TimerEmbedUpdater } from './timer-embed-updater.js';
 import { buildFarewellMessage, FAREWELL_CONTENT } from './farewell-message.js';
+import { buildAutoStartResetMessage } from './auto-start-message.js';
 import { buildTimeoutMessage, TIMEOUT_CONTENT } from './timeout-message.js';
 import { buildWelcomeMessage, WELCOME_CONTENT } from './welcome-message.js';
 import {
@@ -255,6 +256,32 @@ export class EmbedManager {
     await this.#deleteStartEmbed();
     const posted = await this.#postFresh(buildStartEmbedMessage(this.#config));
     this.#startEmbedId = posted.id;
+  }
+
+  /**
+   * 自動スタートによる再開のための軽量リセット (auto-start)。
+   * onEnded から finish 音・お疲れさま投稿・kick・bot 切断を除いたもので、
+   * 直後に timer.start() を呼ぶ前提。updater/debouncer/23時間キャップを止め、
+   * タイマー Embed と歓迎投稿を消し、継続状態と timer を idle に戻す。
+   * 新スタート Embed は出さない (timer.start → onTimerStart の #postFresh で旧 Embed も掃除される)。
+   */
+  /** 自動スタートでリセットを伴う場合のお知らせを投稿する (auto-start、resetForRestart の直前)。 */
+  async postAutoStartResetNotice(label: string): Promise<void> {
+    await this.#channel.post(buildAutoStartResetMessage(label));
+  }
+
+  async resetForRestart(): Promise<void> {
+    this.#updater?.stop();
+    this.#updater = null;
+    this.#debouncer.cancel();
+    this.#cancelFarewellDeletion();
+    // 継続状態・23時間キャップをクリア (新セッションは onTimerStart で再 arm)。
+    this.#resetContinueState();
+    this.#currentPhase = 'idle';
+    await this.#deleteTimerEmbed();
+    await this.#deleteWelcomeMessage();
+    // ended と同様、明示的に reset() して phase='idle' に戻す (次の start が弾かれないように)。
+    this.#timer.reset();
   }
 
   /**

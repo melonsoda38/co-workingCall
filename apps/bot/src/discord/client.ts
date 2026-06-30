@@ -4,6 +4,7 @@ import {
   SETTINGS_MODAL_ID,
   VOLUME_MODAL_ID,
   handleAdminRole,
+  handleAutoLabel,
   handleContinueButton,
   handlePomoInit,
   handlePomoStop,
@@ -56,7 +57,7 @@ async function setupVoiceOnReady(
     logger.info('config 未確定のため VC 機能は待機 (/pomo init 後の再起動で有効化)');
     return;
   }
-  await setupVoiceFeature(client, result.config, logger, sessions);
+  await setupVoiceFeature(client, result.config, logger, sessions, configPath);
 }
 
 /**
@@ -85,6 +86,8 @@ export async function startBot(token: string, logger: Logger, configPath: string
           void handlePomoInit(interaction, session, configPath, logger);
         } else if (sub === 'stop') {
           void handlePomoStop(interaction, session, logger);
+        } else if (sub === 'auto-label') {
+          void handleAutoLabel(interaction, session, configPath, logger);
         }
       }
       return;

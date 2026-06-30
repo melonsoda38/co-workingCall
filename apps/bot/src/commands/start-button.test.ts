@@ -80,6 +80,7 @@ function makeSession(opts?: {
     adminRoleName: 'pomo-admin',
     adminRoleNames: [],
     volumes: { workEnd: 0, breakEnd: 0, finalStart: 0, countdownWarning: 0, finish: 0 },
+    autoStart: { time: null, label: '自動スタート' },
   };
   const session = {
     config,
@@ -111,6 +112,7 @@ describe('handleStartButton', () => {
         adminRoleName: 'pomo-admin',
         adminRoleNames: [],
         volumes: { workEnd: -10, breakEnd: 0, finalStart: 0, countdownWarning: 0, finish: 5 },
+        autoStart: { time: null, label: '自動スタート' },
       },
     });
   });

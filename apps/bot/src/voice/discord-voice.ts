@@ -3,10 +3,12 @@ import { ChannelType, Events, type Client, type VoiceChannel, type VoiceState } 
 import type { Logger } from 'pino';
 import type { BotConfig } from '@co-working-call/shared';
 import { createDiscordSoundPlayer } from '../audio/index.js';
+import { AutoStartScheduler } from '../auto-start/scheduler.js';
+import { runAutoStart } from '../auto-start/run-auto-start.js';
 import { createDiscordEmbedChannel } from '../discord/discord-embed-channel.js';
 import type { EndingActions } from '../embed/index.js';
 import { createPomodoroSession } from '../session/index.js';
-import type { VoiceSessionRegistry } from './session-registry.js';
+import type { VoiceSession, VoiceSessionRegistry } from './session-registry.js';
 import { VoiceManager, isTargetVcEvent, type VoiceConnectionHandle } from './voice-manager.js';
 
 /** VC の人間 (非 bot) メンバー数を数える (voice-spec)。 */
@@ -94,6 +96,7 @@ export async function setupVoiceFeature(
   config: BotConfig,
   logger: Logger,
   sessions: VoiceSessionRegistry,
+  configPath: string,
 ): Promise<void> {
   const channel = await client.channels.fetch(config.voiceChannelId);
   if (channel?.type !== ChannelType.GuildVoice) {
@@ -148,14 +151,24 @@ export async function setupVoiceFeature(
     handleVoiceStateUpdate(oldState, newState, channel, config.voiceChannelId, voiceManager);
   });
 
+  // 自動スタートスケジューラ。onFire は登録する voiceSession を遅延参照する
+  // (発火時にはセッション構築済み)。起動時に config.autoStart.time で武装する。
+  const autoStartScheduler = new AutoStartScheduler({
+    logger,
+    onFire: () => runAutoStart(voiceSession, configPath, logger),
+  });
+
   // ▶開始ボタン等から参照できるよう、ギルド単位でセッションを登録する。
-  sessions.set(config.guildId, {
+  const voiceSession: VoiceSession = {
     config,
     timer: session.timer,
     embedManager: session.embedManager,
     voiceManager,
     soundPlayer,
-  });
+    autoStartScheduler,
+  };
+  sessions.set(config.guildId, voiceSession);
+  autoStartScheduler.schedule(config.autoStart.time);
 
   // 起動時点の人間数を反映 (既に人がいれば入室する)。
   void voiceManager.handleHumanCountChange(countHumans(channel));

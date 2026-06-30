@@ -20,6 +20,11 @@ export const WORK_MIN_ID = 'work_min';
 export const BREAK_MIN_ID = 'break_min';
 export const SETS_ID = 'sets';
 export const FINAL_MIN_ID = 'final_min';
+export const AUTO_START_TIME_ID = 'auto_start_time';
+
+/** 自動スタート時刻の入力形式 (JST "HH:MM" 24時間表記)。 */
+const AUTO_START_TIME_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
+const AUTO_START_TIME_ERROR = '自動スタート時刻はHH:MM形式（例 07:30）で入力してください';
 
 /** config 未存在時のフォールバック (commands-spec モーダル placeholder: 50/10/2/15 分)。 */
 const DEFAULT_TIMER: TimerConfig = {
@@ -43,8 +48,33 @@ function labelField(id: string, labelText: string, value: string, maxLength: num
     );
 }
 
-/** タイマー設定モーダル (commands-spec §タイマー設定モーダル)。 */
-export function buildSettingsModal(timer: TimerConfig): ModalBuilder {
+/** 任意入力フィールド (空欄送信を許す)。自動スタート時刻用。 */
+function optionalLabelField(
+  id: string,
+  labelText: string,
+  value: string,
+  placeholder: string,
+  maxLength: number,
+): LabelBuilder {
+  return new LabelBuilder()
+    .setLabel(labelText)
+    .setTextInputComponent(
+      new TextInputBuilder()
+        .setCustomId(id)
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false)
+        .setMaxLength(maxLength)
+        .setPlaceholder(placeholder)
+        .setValue(value),
+    );
+}
+
+/**
+ * タイマー設定モーダル (commands-spec §タイマー設定モーダル)。
+ * 5番目に自動スタート時刻 (JST "HH:MM"、任意) を持つ。空欄送信で自動スタート無効。
+ * Discord のモーダルは最大5フィールドのため、これで上限いっぱい。
+ */
+export function buildSettingsModal(timer: TimerConfig, autoStartTime: string | null): ModalBuilder {
   const min = (sec: number): string => String(Math.round(sec / 60));
   return new ModalBuilder()
     .setCustomId(SETTINGS_MODAL_ID)
@@ -55,6 +85,14 @@ export function buildSettingsModal(timer: TimerConfig): ModalBuilder {
       labelField(BREAK_MIN_ID, '休憩時間（分）', min(timer.breakSec), 3),
       labelField(SETS_ID, 'セット数', String(timer.sets), 3),
       labelField(FINAL_MIN_ID, '最終休憩（分）', min(timer.finalBreakSec), 3),
+      // "HH:MM" の 5 文字。空欄で自動スタート無効。
+      optionalLabelField(
+        AUTO_START_TIME_ID,
+        '自動スタート時刻（JST・任意・空欄で無効）',
+        autoStartTime ?? '',
+        '07:30',
+        5,
+      ),
     );
 }
 
@@ -72,20 +110,44 @@ const FIELD_ERROR: Record<string, string> = {
   finalMin: '最終休憩は1〜999分の整数で入力してください',
 };
 
+/** 自動スタート時刻 (任意) を検証する。空 → null (無効化)、非空 → HH:MM 検証。 */
+function parseAutoStartTime(raw: string): { ok: true; value: string | null } | { ok: false } {
+  const trimmed = raw.trim();
+  if (trimmed === '') {
+    return { ok: true, value: null };
+  }
+  return AUTO_START_TIME_REGEX.test(trimmed) ? { ok: true, value: trimmed } : { ok: false };
+}
+
 /**
- * モーダル入力 (分・文字列) を検証し TimerConfig (秒) を返す純粋関数。
- * エラーは commands-spec のフィールド別文言で返す。
+ * モーダル入力 (分・文字列) を検証し TimerConfig (秒) と自動スタート時刻を返す純粋関数。
+ * エラーは commands-spec のフィールド別文言で返す。autoStartTime は空欄で null (自動スタート無効)。
  */
 export function parseSettingsModalInput(raw: {
   workMin: string;
   breakMin: string;
   sets: string;
   finalMin: string;
-}): { ok: true; timer: TimerConfig } | { ok: false; errors: string[] } {
-  const result = SettingsModalSchema.safeParse(raw);
-  if (!result.success) {
-    const fields = new Set(result.error.issues.map((issue) => String(issue.path[0])));
-    const errors = [...fields].map((field) => FIELD_ERROR[field] ?? '入力値が不正です');
+  autoStartTime: string;
+}):
+  | { ok: true; timer: TimerConfig; autoStartTime: string | null }
+  | { ok: false; errors: string[] } {
+  const result = SettingsModalSchema.safeParse({
+    workMin: raw.workMin,
+    breakMin: raw.breakMin,
+    sets: raw.sets,
+    finalMin: raw.finalMin,
+  });
+  const time = parseAutoStartTime(raw.autoStartTime);
+  if (!result.success || !time.ok) {
+    const errors: string[] = [];
+    if (!result.success) {
+      const fields = new Set(result.error.issues.map((issue) => String(issue.path[0])));
+      errors.push(...[...fields].map((field) => FIELD_ERROR[field] ?? '入力値が不正です'));
+    }
+    if (!time.ok) {
+      errors.push(AUTO_START_TIME_ERROR);
+    }
     return { ok: false, errors };
   }
   const timer = {
@@ -98,7 +160,7 @@ export function parseSettingsModalInput(raw: {
   if (!parsed.success) {
     return { ok: false, errors: ['設定値が不正です'] };
   }
-  return { ok: true, timer: parsed.data };
+  return { ok: true, timer: parsed.data, autoStartTime: time.value };
 }
 
 /**
@@ -148,7 +210,8 @@ export async function handleSettingsButton(
 
     session?.embedManager.adoptStartEmbed(interaction.message.id);
     const timer = config?.default ?? DEFAULT_TIMER;
-    await interaction.showModal(buildSettingsModal(timer));
+    const autoStartTime = config?.autoStart.time ?? null;
+    await interaction.showModal(buildSettingsModal(timer, autoStartTime));
   } catch (err) {
     logger.error({ err }, '設定モーダルの表示に失敗しました');
   }
@@ -174,6 +237,7 @@ export async function handleSettingsModalSubmit(
       breakMin: interaction.fields.getTextInputValue(BREAK_MIN_ID),
       sets: interaction.fields.getTextInputValue(SETS_ID),
       finalMin: interaction.fields.getTextInputValue(FINAL_MIN_ID),
+      autoStartTime: interaction.fields.getTextInputValue(AUTO_START_TIME_ID),
     });
     if (!result.ok) {
       await interaction.reply({
@@ -192,13 +256,22 @@ export async function handleSettingsModalSubmit(
       return;
     }
 
-    const updated: BotConfig = { ...existing.config, default: result.timer };
+    const updated: BotConfig = {
+      ...existing.config,
+      default: result.timer,
+      autoStart: { ...existing.config.autoStart, time: result.autoStartTime },
+    };
     await saveConfig(configPath, updated);
+    // 自動スタート時刻の変更を稼働中スケジューラへ即反映 (再起動不要)。
+    session?.autoStartScheduler.schedule(updated.autoStart.time);
     await interaction.reply({
       content: '設定を保存しました ✅',
       flags: MessageFlags.Ephemeral,
     });
-    logger.info({ default: updated.default }, '設定モーダルで config を更新しました');
+    logger.info(
+      { default: updated.default, autoStart: updated.autoStart },
+      '設定モーダルで config を更新しました',
+    );
 
     // 最新 config で Start Embed を投稿し直す (ephemeral 応答後に実行し、
     // チャンネル最下部に最新版 Embed を露出させる)。

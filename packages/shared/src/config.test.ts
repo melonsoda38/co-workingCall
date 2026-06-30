@@ -42,4 +42,32 @@ describe('BotConfigSchema', () => {
       }).success,
     ).toBe(false);
   });
+
+  it('autoStart 省略時は無効 (time=null・既定ラベル) で埋まる (後方互換)', () => {
+    const parsed = BotConfigSchema.parse({
+      default: validDefault,
+      guildId: '123',
+      voiceChannelId: '456',
+    });
+    expect(parsed.autoStart).toEqual({ time: null, label: '自動スタート' });
+  });
+
+  it('autoStart の time は HH:MM 形式のみ受理する', () => {
+    expect(
+      BotConfigSchema.safeParse({
+        default: validDefault,
+        guildId: '123',
+        voiceChannelId: '456',
+        autoStart: { time: '07:30', label: '朝活' },
+      }).success,
+    ).toBe(true);
+    expect(
+      BotConfigSchema.safeParse({
+        default: validDefault,
+        guildId: '123',
+        voiceChannelId: '456',
+        autoStart: { time: '7:30' },
+      }).success,
+    ).toBe(false);
+  });
 });

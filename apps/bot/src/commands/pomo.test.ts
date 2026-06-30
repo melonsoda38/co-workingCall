@@ -4,7 +4,13 @@ import type { Logger } from 'pino';
 import type { BotConfig } from '@co-working-call/shared';
 import type { VoiceSession } from '../voice/session-registry.js';
 import { PermissionFlagsBits } from 'discord.js';
-import { handleAdminRole, handlePomoInit, handlePomoStop, pomoCommand } from './pomo.js';
+import {
+  handleAdminRole,
+  handleAutoLabel,
+  handlePomoInit,
+  handlePomoStop,
+  pomoCommand,
+} from './pomo.js';
 
 vi.mock('../config/index.js', () => ({ loadConfig: vi.fn(), saveConfig: vi.fn() }));
 import { loadConfig, saveConfig } from '../config/index.js';
@@ -23,12 +29,13 @@ const CONFIG: BotConfig = {
   adminRoleName: 'pomo-admin',
   adminRoleNames: [],
   volumes: { workEnd: 0, breakEnd: 0, finalStart: 0, countdownWarning: 0, finish: 0 },
+  autoStart: { time: null, label: '自動スタート' },
 };
 
 function makeInteraction(
   roleNames: string[],
   channelType: ChannelType = ChannelType.GuildVoice,
-  options?: { subcommand?: string; roleName?: string },
+  options?: { subcommand?: string; roleName?: string; text?: string },
 ) {
   const deferReply = vi.fn<() => Promise<void>>(() => Promise.resolve());
   const editReply = vi.fn<() => Promise<void>>(() => Promise.resolve());
@@ -38,19 +45,29 @@ function makeInteraction(
   );
   const getSubcommand = vi.fn(() => options?.subcommand ?? 'list');
   const getRole = vi.fn(() => ({ name: options?.roleName ?? 'mod' }));
+  const getString = vi.fn(() => options?.text ?? '朝活');
   const interaction = {
     user: { id: 'user-1' },
     guildId: 'guild-1',
     guild: { id: 'guild-1', members: { fetch } },
     channel: { type: channelType },
-    options: { getSubcommand, getRole },
+    options: { getSubcommand, getRole, getString },
     deferred: true,
     replied: false,
     deferReply,
     editReply,
     deleteReply,
   } as unknown as ChatInputCommandInteraction;
-  return { interaction, deferReply, editReply, deleteReply, fetch, getSubcommand, getRole };
+  return {
+    interaction,
+    deferReply,
+    editReply,
+    deleteReply,
+    fetch,
+    getSubcommand,
+    getRole,
+    getString,
+  };
 }
 
 function makeSession(opts?: { connected?: boolean; alreadyConnected?: boolean }): {
@@ -225,6 +242,53 @@ describe('handleAdminRole', () => {
     await handleAdminRole(interaction, session, 'cfg.json', logger);
     expect(editReply).toHaveBeenCalledWith(expect.stringContaining('唯一の許可ロール'));
     expect(saveConfig).not.toHaveBeenCalled();
+  });
+});
+
+describe('handleAutoLabel', () => {
+  beforeEach(() => {
+    vi.mocked(loadConfig).mockResolvedValue({ status: 'ok', config: { ...CONFIG } });
+    vi.mocked(saveConfig).mockResolvedValue(undefined);
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('テキストチャンネルなら VC テキスト欄エラーを出し保存しない', async () => {
+    const { interaction, editReply } = makeInteraction(['pomo-admin'], ChannelType.GuildText, {
+      text: '朝活',
+    });
+    const { session } = makeSession();
+    await handleAutoLabel(interaction, session, 'cfg.json', logger);
+    expect(editReply).toHaveBeenCalledWith(
+      'このコマンドはボイスチャンネル内のテキスト欄で実行してください',
+    );
+    expect(saveConfig).not.toHaveBeenCalled();
+  });
+
+  it('権限が無ければ拒否し保存しない', async () => {
+    const { interaction } = makeInteraction(['member'], ChannelType.GuildVoice, { text: '朝活' });
+    const { session } = makeSession();
+    await handleAutoLabel(interaction, session, 'cfg.json', logger);
+    expect(saveConfig).not.toHaveBeenCalled();
+  });
+
+  it('ラベルを保存しセッションへ反映する (時刻は変えない)', async () => {
+    vi.mocked(loadConfig).mockResolvedValue({
+      status: 'ok',
+      config: { ...CONFIG, autoStart: { time: '07:30', label: '自動スタート' } },
+    });
+    const { interaction, editReply } = makeInteraction(['pomo-admin'], ChannelType.GuildVoice, {
+      text: '朝活',
+    });
+    const { session } = makeSession();
+    await handleAutoLabel(interaction, session, 'cfg.json', logger);
+    expect(saveConfig).toHaveBeenCalledWith(
+      'cfg.json',
+      expect.objectContaining({ autoStart: { time: '07:30', label: '朝活' } }),
+    );
+    expect(session.config.autoStart.label).toBe('朝活');
+    expect(editReply).toHaveBeenCalledWith(expect.stringContaining('朝活'));
   });
 });
 

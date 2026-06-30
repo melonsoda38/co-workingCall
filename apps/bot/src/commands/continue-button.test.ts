@@ -63,6 +63,7 @@ function makeSession(registerResult: 'ok' | 'closed') {
     adminRoleName: 'pomo-admin',
     adminRoleNames: [],
     volumes: { workEnd: 0, breakEnd: 0, finalStart: 0, countdownWarning: 0, finish: 0 },
+    autoStart: { time: null, label: '自動スタート' },
   };
   const session = {
     config,

@@ -49,6 +49,18 @@ export const pomoCommand = new SlashCommandBuilder()
       .setName('stop')
       .setDescription('タイマーを強制停止してスタート画面に戻す (設定は保持・テスト用)'),
   )
+  .addSubcommand((sub) =>
+    sub
+      .setName('auto-label')
+      .setDescription('自動スタート時のお知らせに使う文字を設定する')
+      .addStringOption((opt) =>
+        opt
+          .setName('text')
+          .setDescription('お知らせに差し込む文字 (例: 朝活)')
+          .setRequired(true)
+          .setMaxLength(50),
+      ),
+  )
   .addSubcommandGroup((group) =>
     group
       .setName('admin-role')
@@ -143,6 +155,8 @@ export async function handlePomoInit(
         countdownWarning: 0,
         finish: 0,
       },
+      // 既存の自動スタート設定は維持。新規は無効 (time=null)。
+      autoStart: existingConfig?.autoStart ?? { time: null, label: '自動スタート' },
     };
     await saveConfig(configPath, config);
     // 新規スタート Embed 投稿の直前に、対象 VC テキスト欄から bot 自身の過去 Embed を掃除
@@ -368,6 +382,81 @@ export async function handleAdminRole(
     }
   } finally {
     // /pomo admin-role の ephemeral 応答を 6 時間後に自動削除する。
+    scheduleEphemeralAutoDelete(interaction, logger);
+  }
+}
+
+/**
+ * /pomo auto-label ハンドラ。自動スタート時のお知らせ ("xx") に使う文字を設定する。
+ * admin-role と同方式で config.json 保存に加え稼働中セッションへも即反映 (再起動不要)。
+ * 時刻 (autoStart.time) には影響しないため再スケジュールは不要。
+ */
+export async function handleAutoLabel(
+  interaction: ChatInputCommandInteraction,
+  session: VoiceSession | undefined,
+  configPath: string,
+  logger: Logger,
+): Promise<void> {
+  try {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    if (!isVoiceTextContext(interaction.channel?.type)) {
+      await interaction.editReply(VC_TEXT_ONLY_MESSAGE);
+      return;
+    }
+    if (!session) {
+      await interaction.editReply(
+        'セットアップが必要です。/pomo init 実行後に bot を再起動してください',
+      );
+      return;
+    }
+    const guild = interaction.guild;
+    if (!guild) {
+      await interaction.editReply('サーバー内で実行してください');
+      return;
+    }
+
+    const member = await guild.members.fetch(interaction.user.id);
+    const roleNames = member.roles.cache.map((role) => role.name);
+    const allowedRoles = buildAllowedRoleNames(
+      session.config.adminRoleName,
+      session.config.adminRoleNames,
+    );
+    if (!hasAnyAdminRole(roleNames, allowedRoles)) {
+      await interaction.editReply(adminRoleRequiredMessage(allowedRoles));
+      return;
+    }
+
+    const text = interaction.options.getString('text', true).trim();
+    if (text === '') {
+      await interaction.editReply('ラベルには1文字以上を指定してください');
+      return;
+    }
+
+    const loaded = await loadConfig(configPath);
+    const base = loaded.status === 'ok' ? loaded.config : session.config;
+    const updated: BotConfig = { ...base, autoStart: { ...base.autoStart, label: text } };
+    await saveConfig(configPath, updated);
+    session.config = updated; // 稼働中セッションへ即反映 (再起動不要)
+
+    await interaction.editReply(`自動スタートのお知らせ文字を「${text}」に設定しました`);
+    logger.info({ guildId: guild.id, label: text }, '/pomo auto-label 実行');
+  } catch (err) {
+    logger.error({ err }, '/pomo auto-label 処理に失敗しました');
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply('ラベル設定の更新に失敗しました。ログを確認してください');
+      } else {
+        await interaction.reply({
+          content: 'ラベル設定の更新に失敗しました。ログを確認してください',
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+    } catch (replyErr) {
+      logger.error({ err: replyErr }, 'エラー応答にも失敗しました');
+    }
+  } finally {
+    // /pomo auto-label の ephemeral 応答を 6 時間後に自動削除する。
     scheduleEphemeralAutoDelete(interaction, logger);
   }
 }
