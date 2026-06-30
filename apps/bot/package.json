@@ -5,10 +5,10 @@
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
-    "dev": "node --watch --env-file=.env ./dist/index.js",
+    "dev": "NODE_ENV=staging node --watch ./dist/index.js",
     "build": "tsc -b",
     "typecheck": "tsc -b",
-    "start": "node --env-file=.env ./dist/index.js",
+    "start": "node ./dist/index.js",
     "smoke:audio": "node ./dist/audio/smoke.js",
     "test": "vitest run --passWithNoTests"
   },

@@ -7,11 +7,16 @@ dist/
 *.log
 
 # 環境変数 (DISCORD_TOKEN 等。絶対にコミットしない)
+# .env (本番) / .env.staging (ローカルのテスト版app) はいずれも Token を含むためコミットしない。
 .env
+.env.staging
 !.env.example
+!.env.staging.example
 
 # ランタイム生成設定 (/pomo init で生成される)
+# config.json (本番 guild) / config.staging.json (テスト guild) はそれぞれ guildId を持つ。
 apps/bot/config.json
+apps/bot/config.staging.json
 
 # pidfile (多重起動防止。SIGKILL 等で残った場合は次回起動時に stale 判定で回収される)
 bot.pid

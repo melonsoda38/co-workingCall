@@ -146,6 +146,27 @@ CONFIG_PATH=./config.json
 LOG_LEVEL=info
 ```
 
+#### 本番/テストの env 自動切り替え (NODE_ENV)
+
+bot は起動時に `NODE_ENV` を見て読み込む env ファイルを切り替える
+(`apps/bot/src/load-env.ts`)。
+
+| NODE_ENV | 読む env ファイル | 用途 |
+| --- | --- | --- |
+| `production` | `apps/bot/.env` | 本番 (この Pi) |
+| それ以外/未設定 | `apps/bot/.env.staging` | ローカルのテスト版 app |
+
+- **本番 (この Pi) では `NODE_ENV=production` を設定する。** 後述の systemd
+  サービスファイルの `[Service]` に `Environment=NODE_ENV=production` を 1 行
+  追記する。これにより `start` 実行時に既存の `.env` が読まれる。
+  **`.env` 自体は変更不要。**
+- ローカル開発機では `apps/bot/package.json` の `dev` が `NODE_ENV=staging` を
+  設定済みのため、`pnpm --filter bot dev` で自動的に `.env.staging` を読む。
+  `.env.staging` は `.env.staging.example` をコピーして作る (テスト版 app の
+  Token と `CONFIG_PATH=./config.staging.json`)。
+- 安全側設計: NODE_ENV が未設定でも staging 扱いになるため、設定漏れで誤って
+  本番 Token を使うことはない。本番だけ明示的に `production` を設定する。
+
 ### 3. 音源ファイルの配置
 音源 mp3 5 ファイルはリポジトリに含まれない (`.gitignore` 対象。公開リポジトリでの再配布禁止のため)。
 別途用意した以下 5 ファイルを `apps/bot/assets/sounds/` に手動配置する:
@@ -202,6 +223,9 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=%h/co-workingCall-limited
+# 本番であることを示す。これにより bot は .env.staging ではなく既存の .env を読む。
+# (未設定だと staging 扱いになり .env.staging を探して起動に失敗する)
+Environment=NODE_ENV=production
 # Node のフルバージョンパスを直接書かない (nvm の patch 更新で壊れるため)。
 # ランチャが nvm ロード + Node 22 選択 + バージョン検証まで行う。
 ExecStart=%h/co-workingCall-limited/scripts/start-bot.sh

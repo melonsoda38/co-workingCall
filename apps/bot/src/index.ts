@@ -1,6 +1,7 @@
 import { loadConfig } from './config/index.js';
 import { startBot } from './discord/client.js';
 import { parseEnv, type Env } from './env.js';
+import { loadEnvForApp, type LoadedEnvInfo } from './load-env.js';
 import { createLogger } from './logger.js';
 import { acquireSingleInstance, DEFAULT_PID_FILE_PATH } from './single-instance.js';
 
@@ -13,6 +14,17 @@ async function main(): Promise<void> {
   // env 検証前はレベル不明のため固定 info のブートロガーを使う。
   const bootLogger = createLogger('info');
 
+  // NODE_ENV で動作環境を判定し、対応する env ファイル (.env / .env.staging) を
+  // process.env へ読み込む。--env-file 相当の処理をコード側に一本化している。
+  let loaded: LoadedEnvInfo;
+  try {
+    loaded = loadEnvForApp();
+  } catch (err) {
+    bootLogger.fatal({ err }, 'env ファイルの読み込みに失敗しました');
+    process.exitCode = 1;
+    return;
+  }
+
   let env: Env;
   try {
     env = parseEnv();
@@ -23,7 +35,8 @@ async function main(): Promise<void> {
   }
 
   const logger = createLogger(env.LOG_LEVEL);
-  logger.info('co-workingCall bot 起動中');
+  // どの環境・どの env ファイルで起動したかを残す (本番/テストの取り違え防止)。
+  logger.info({ appEnv: loaded.appEnv, envFile: loaded.envFile }, 'co-workingCall bot 起動中');
 
   // 多重起動防止 (pidfile)。同じトークンの bot が並走すると Discord Gateway 上で
   // 同じ voiceStateUpdate / interaction を両プロセスが処理し、Embed 投稿が
