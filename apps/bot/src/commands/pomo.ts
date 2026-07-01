@@ -1,6 +1,7 @@
 import {
   ChannelType,
   ChatInputCommandInteraction,
+  EmbedBuilder,
   MessageFlags,
   PermissionFlagsBits,
   SlashCommandBuilder,
@@ -82,6 +83,9 @@ export const pomoCommand = new SlashCommandBuilder()
           ),
       )
       .addSubcommand((sub) => sub.setName('list').setDescription('現在の許可ロール一覧を表示する')),
+  )
+  .addSubcommand((sub) =>
+    sub.setName('help').setDescription('コマンドとボタンの説明を表示する'),
   );
 
 /**
@@ -207,6 +211,51 @@ export async function handlePomoInit(
   } finally {
     // /pomo init の ephemeral 応答を 6 時間後に自動削除する。
     scheduleEphemeralAutoDelete(interaction, logger);
+  }
+}
+
+/**
+ * /pomo help ハンドラ。このコマンド (/pomo のサブコマンド) とスタート/最終休憩 Embed の
+ * ボタンの機能一覧を Embed で表示する。config/session は参照しないため、
+ * 他ハンドラとのシグネチャ統一のため引数に残すが未使用。応答は本人のみの ephemeral。
+ */
+export async function handlePomoHelp(
+  interaction: ChatInputCommandInteraction,
+  _session: VoiceSession | undefined,
+  _configPath: string,
+  logger: Logger,
+): Promise<void> {
+  try {
+    const embed = new EmbedBuilder()
+      .setTitle('ポモドーロ bot ヘルプ')
+      .setDescription('このサーバーで使えるコマンドとボタンの一覧です。')
+      .addFields(
+        {
+          name: 'スラッシュコマンド (/pomo)',
+          value: [
+            '`/pomo init` : このボイスチャンネルでセットアップ/復旧する (設定生成 + bot 入室)',
+            '`/pomo stop` : タイマーを強制停止してスタート画面に戻す (設定は保持・テスト用)',
+            '`/pomo auto-label <text>` : 自動スタート時のお知らせに差し込む文字を設定する (最大50文字)',
+            '`/pomo admin-role add/remove/list` : コマンド実行を許可する追加ロールを管理する',
+            '`/pomo help` : このヘルプを表示する',
+          ].join('\n'),
+        },
+        {
+          name: 'ボタン (スタート画面)',
+          value: [
+            '**タイマー開始 (▶️)** : タイマーを開始し作業フェーズへ移行する',
+            '**設定 (⚙️: ⏰)** : 作業/休憩時間・セット数・最終休憩・自動スタート時刻の設定モーダルを開く',
+            '**音量 (⚙️: 🔊)** : 5種の通知音の音量 (dB) を設定するモーダルを開く',
+          ].join('\n'),
+        },
+        {
+          name: 'ボタン (最終休憩フェーズ)',
+          value: '**続行** : 最終休憩後もタイマーを続ける (VC 参加者なら誰でも押せる・権限不要)',
+        },
+      );
+    await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+  } catch (err) {
+    logger.error({ err }, '/pomo help 処理に失敗しました');
   }
 }
 

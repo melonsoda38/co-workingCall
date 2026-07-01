@@ -6,6 +6,7 @@ import {
   handleAdminRole,
   handleAutoLabel,
   handleContinueButton,
+  handlePomoHelp,
   handlePomoInit,
   handlePomoStop,
   handleSettingsButton,
@@ -88,6 +89,8 @@ export async function startBot(token: string, logger: Logger, configPath: string
           void handlePomoStop(interaction, session, logger);
         } else if (sub === 'auto-label') {
           void handleAutoLabel(interaction, session, configPath, logger);
+        } else if (sub === 'help') {
+          void handlePomoHelp(interaction, session, configPath, logger);
         }
       }
       return;
