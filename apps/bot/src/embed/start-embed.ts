@@ -30,6 +30,16 @@ export function buildStartEmbedMessage(config: BotConfig): MessageCreateOptions 
     .setDescription('ボタンを押して作業を始めましょう')
     .addFields({ name: '現在の設定', value: formatConfigSummary(config) });
 
+  // 自動スタート時刻 (JST "HH:MM") が設定されている場合のみ案内を出す。
+  // 未設定 (null) のときはフィールド自体を表示しない。
+  const autoStartTime = config.autoStart.time;
+  if (autoStartTime !== null) {
+    embed.addFields({
+      name: '自動スタート',
+      value: `${autoStartTime}にタイマーが自動スタートします`,
+    });
+  }
+
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(START_BUTTON_ID)

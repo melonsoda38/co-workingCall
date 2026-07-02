@@ -45,6 +45,26 @@ describe('buildStartEmbedMessage', () => {
     });
   });
 
+  it('自動スタート時刻が未設定 (null) なら自動スタートのフィールドを出さない', () => {
+    const msg = buildStartEmbedMessage(config);
+    const json = (msg.embeds?.[0] as EmbedBuilder).toJSON();
+    expect(json.fields).toHaveLength(1);
+    expect(json.fields?.some((f) => f.name === '自動スタート')).toBe(false);
+  });
+
+  it('自動スタート時刻が設定済みなら案内フィールドを出す', () => {
+    const withAutoStart: BotConfig = {
+      ...config,
+      autoStart: { time: '07:00', label: '自動スタート' },
+    };
+    const msg = buildStartEmbedMessage(withAutoStart);
+    const json = (msg.embeds?.[0] as EmbedBuilder).toJSON();
+    expect(json.fields?.[1]).toMatchObject({
+      name: '自動スタート',
+      value: '07:00にタイマーが自動スタートします',
+    });
+  });
+
   it('SuppressNotifications フラグが付く', () => {
     const msg = buildStartEmbedMessage(config);
     expect(msg.flags).toBe(MessageFlags.SuppressNotifications);
