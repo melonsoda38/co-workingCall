@@ -552,8 +552,11 @@ export class EmbedManager {
     this.#currentPhase = to;
 
     if (this.#timerEmbedId === null) {
-      // 初回 (idle→work): スタート削除 → タイマー投稿 (通知音なし)。
+      // 初回 (idle→work): セッション開始の合図として break_end.mp3 を鳴らし、
+      // スタート削除 → タイマー投稿。onTimerStart は await を挟むため、音は
+      // await の前に fire-and-forget で鳴らして即時性を確保する。
       this.#logger.info({ to, currentSet: snapshot.currentSet }, 'タイマー初回フェーズ突入');
+      this.#soundNotifier?.playBreakEnd();
       await this.onTimerStart();
       return;
     }

@@ -340,7 +340,7 @@ describe('EmbedManager フェーズ切替の通知音 (US-11)', () => {
     vi.useRealTimers();
   });
 
-  it('初回 work は通知音なし、work→break=workEnd、break→work=breakEnd', async () => {
+  it('初回 work で breakEnd、work→break=workEnd、break→work=breakEnd', async () => {
     const { channel } = fakeChannel();
     const timer = new FakeTimer();
     const sound = fakeSound();
@@ -354,7 +354,9 @@ describe('EmbedManager フェーズ切替の通知音 (US-11)', () => {
 
     timer.emit('phaseChange', makeSnapshot('work')); // 初回 (idle→work)
     await vi.advanceTimersByTimeAsync(0);
+    // 初回はセッション開始の合図として breakEnd を鳴らす (workEnd は鳴らさない)。
     expect(sound.playWorkEnd).not.toHaveBeenCalled();
+    expect(sound.playBreakEnd).toHaveBeenCalledTimes(1);
     expect(m.timerEmbedId).not.toBeNull();
 
     timer.emit('phaseChange', makeSnapshot('break')); // work→break
@@ -363,7 +365,8 @@ describe('EmbedManager フェーズ切替の通知音 (US-11)', () => {
 
     timer.emit('phaseChange', makeSnapshot('work')); // break→work
     await vi.advanceTimersByTimeAsync(0);
-    expect(sound.playBreakEnd).toHaveBeenCalledTimes(1);
+    // 開始時の1回 + break→work の1回で累計2回。
+    expect(sound.playBreakEnd).toHaveBeenCalledTimes(2);
   });
 
   it('work→finalBreak で finalStart を鳴らし再投稿後も 5秒更新が続く', async () => {

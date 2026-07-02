@@ -73,9 +73,9 @@ describe('createPomodoroSession (US-15 フェーズ切替音の統合)', () => {
     const session = createPomodoroSession({ channel: fakeChannel(), config, logger, soundPlayer });
 
     await session.embedManager.onIdle(); // スタート Embed 投稿
-    session.timer.start(config.default); // idle→work(1): 初回は無音
+    session.timer.start(config.default); // idle→work(1): 開始の合図に break_end.mp3
     await vi.advanceTimersByTimeAsync(0);
-    expect(createResource).not.toHaveBeenCalled();
+    expect(createResource).toHaveBeenLastCalledWith('/sounds/break_end.mp3', 0);
 
     await vi.advanceTimersByTimeAsync(1000); // work(1)→break(1)
     expect(createResource).toHaveBeenLastCalledWith('/sounds/work_end.mp3', 0);
