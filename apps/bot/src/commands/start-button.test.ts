@@ -126,26 +126,12 @@ describe('handleStartButton', () => {
     expect(reply).toHaveBeenCalledTimes(1);
   });
 
-  it('許可ロールを持たない実行者は ephemeral 応答で弾かれ開始しない', async () => {
-    const { interaction, reply, deferUpdate } = makeInteraction({
+  it('許可ロールを持たない実行者でも VC にいれば開始できる (続行ボタンと同様ロール不問)', async () => {
+    const { interaction, deferUpdate, reply } = makeInteraction({
       memberVcId: TARGET_VC,
       memberRoles: ['everyone'],
     });
     const { session, start } = makeSession();
-    await handleStartButton(interaction, session, 'cfg.json', logger);
-    expect(reply).toHaveBeenCalledTimes(1);
-    expect(deferUpdate).not.toHaveBeenCalled();
-    expect(start).not.toHaveBeenCalled();
-  });
-
-  it('追加ロール (adminRoleNames) 保持者は開始できる', async () => {
-    const { interaction, deferUpdate, reply } = makeInteraction({
-      memberVcId: TARGET_VC,
-      memberRoles: ['member', 'study-lead'],
-    });
-    const { session, start } = makeSession();
-    // session.config に追加ロールを足す。
-    (session.config as { adminRoleNames: string[] }).adminRoleNames = ['study-lead'];
     await handleStartButton(interaction, session, 'cfg.json', logger);
     expect(reply).not.toHaveBeenCalled();
     expect(deferUpdate).toHaveBeenCalledTimes(1);
