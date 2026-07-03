@@ -1,4 +1,4 @@
-import type { MessageCreateOptions } from 'discord.js';
+import { MessageFlags, type MessageCreateOptions } from 'discord.js';
 
 /**
  * 23時間キャップによる強制終了時の投稿文言 (US-続行)。
@@ -10,9 +10,9 @@ export const TIMEOUT_CONTENT =
 
 /**
  * 23時間キャップ終了の投稿。farewell と同様に Embed なしのプレーンテキストで、
- * SuppressNotifications は付けない (参加者に通知する)。purgeOwnEmbeds の対象外のため
- * EmbedManager 側で本文一致掃除 (purgeOwnTexts) の対象にも含める。
+ * SuppressNotifications を付けて通知音を鳴らさない (サイレント投稿)。purgeOwnEmbeds の
+ * 対象外のため EmbedManager 側で本文一致掃除 (purgeOwnTexts) の対象にも含める。
  */
 export function buildTimeoutMessage(): MessageCreateOptions {
-  return { content: TIMEOUT_CONTENT };
+  return { content: TIMEOUT_CONTENT, flags: MessageFlags.SuppressNotifications };
 }

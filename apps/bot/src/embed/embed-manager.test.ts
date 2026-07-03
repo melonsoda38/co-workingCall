@@ -488,7 +488,7 @@ describe('EmbedManager 終了演出フロー (US-19)', () => {
     expect(sound.playFinish).toHaveBeenCalledTimes(1);
     // タイマー Embed (m1) が削除される。
     expect(del).toHaveBeenCalledWith(timerEmbedId);
-    // お疲れさま投稿が post される (SuppressNotifications なし = flags 未指定)。
+    // お疲れさま投稿が post される (通知音OFF = SuppressNotifications 付き)。
     const farewellCall = post.mock.calls.find((c) => c[0].content === 'お疲れさまでした 👋');
     expect(farewellCall).toBeDefined();
     // 余韻 3 秒の delay が呼ばれる。
