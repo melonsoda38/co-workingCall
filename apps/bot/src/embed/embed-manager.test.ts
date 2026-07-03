@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MessageCreateOptions } from 'discord.js';
+import { MessageFlags, type MessageCreateOptions } from 'discord.js';
 import type { Logger } from 'pino';
 import type { BotConfig, TimerSnapshot } from '@co-working-call/shared';
 import {
@@ -173,7 +173,7 @@ describe('EmbedManager', () => {
     expect(m.startEmbedId).toBe('m1');
   });
 
-  it('Embed 投稿の直前に purgeOwnEmbeds を呼ぶ (歓迎・お疲れさまテキストは Embed なしで対象外)', async () => {
+  it('Embed 投稿の直前に purgeOwnEmbeds を呼ぶ (お疲れさまテキストは Embed なしで対象外)', async () => {
     const { channel, post, purgeOwnEmbeds, calls } = fakeChannel();
     const timer = new FakeTimer();
     const m = new EmbedManager({
@@ -184,9 +184,9 @@ describe('EmbedManager', () => {
       endingDelay: () => Promise.resolve(),
     });
     await m.onIdle(); // Embed post: スタート
-    timer.emit('phaseChange', makeSnapshot('work')); // Embed post: タイマー + text post: 歓迎
+    timer.emit('phaseChange', makeSnapshot('work')); // Embed post: タイマー
     await vi.advanceTimersByTimeAsync(0);
-    timer.emit('phaseChange', makeSnapshot('break')); // Embed post: 再投稿 (歓迎は再post しない)
+    timer.emit('phaseChange', makeSnapshot('break')); // Embed post: 再投稿
     await vi.advanceTimersByTimeAsync(0);
     timer.emit('ended', makeSnapshot('ended')); // text post: お疲れさま (新スタートは15秒後)
     await vi.advanceTimersByTimeAsync(0);
@@ -194,9 +194,9 @@ describe('EmbedManager', () => {
     await vi.advanceTimersByTimeAsync(15_000);
 
     // Embed 投稿は 4 回 (onIdle / work / break / ended後15秒の新スタート)。
-    // テキスト投稿 (Embed なし) は歓迎 + お疲れさまの 2 回追加 = post 計 6 回。
-    expect(post).toHaveBeenCalledTimes(6);
-    // purge は Embed 投稿 4 回分だけ。歓迎・お疲れさまテキストの前には purge を入れない。
+    // テキスト投稿 (Embed なし) はお疲れさまの 1 回追加 = post 計 5 回。
+    expect(post).toHaveBeenCalledTimes(5);
+    // purge は Embed 投稿 4 回分だけ。お疲れさまテキストの前には purge を入れない。
     expect(purgeOwnEmbeds).toHaveBeenCalledTimes(4);
     const purgeBeforePost = calls.reduce<number>(
       (acc, c, i) => (c === 'post' && calls[i - 1] === 'purge' ? acc + 1 : acc),
@@ -221,17 +221,17 @@ describe('EmbedManager', () => {
     const m = new EmbedManager({ channel, timer, config, logger });
     await m.onIdle(); // m1 = start
 
-    // phaseChange(work): m1 削除 → m2=timer post → m3=welcome post (Embed なし)。
+    // phaseChange(work): m1 削除 → m2=timer post。
     timer.emit('phaseChange', makeSnapshot('work'));
     await vi.advanceTimersByTimeAsync(0);
     expect(del).toHaveBeenCalledWith('m1');
     expect(m.timerEmbedId).toBe('m2');
 
-    // phaseChange(break): m2 削除 → m4=timer 再投稿 (m3 の welcome は触らない)。
+    // phaseChange(break): m2 削除 → m3=timer 再投稿。
     timer.emit('phaseChange', makeSnapshot('break'));
     await vi.advanceTimersByTimeAsync(0);
     expect(del).toHaveBeenCalledWith('m2');
-    expect(m.timerEmbedId).toBe('m4');
+    expect(m.timerEmbedId).toBe('m3');
   });
 
   it('onHumanMessage は work 中のみデバウンス→再投稿 (60s)、idle は無視', async () => {
@@ -497,34 +497,31 @@ describe('EmbedManager 終了演出フロー (US-19)', () => {
     expect(ending.kickAllHumans).toHaveBeenCalledTimes(1);
     expect(ending.disconnectBot).toHaveBeenCalledTimes(1);
     // fakeChannel は post ごとに m1, m2... を返す:
-    // timerEmbed=m1, welcome=m2, farewell=m3。
-    // 歓迎投稿 (m2) は終了演出中に削除されるが、お疲れさま投稿 (m3) はこの時点では
-    // まだ削除されていない (投稿15秒後)。
-    expect(del.mock.calls.map((c) => c[0])).toContain('m2');
-    expect(del.mock.calls.map((c) => c[0])).not.toContain('m3');
-    expect(m.welcomeMessageId).toBeNull();
+    // timerEmbed=m1, farewell=m2 (歓迎投稿は廃止)。
+    // お疲れさま投稿 (m2) はこの時点ではまだ削除されていない (投稿15秒後)。
+    expect(del.mock.calls.map((c) => c[0])).not.toContain('m2');
     // タイマーが reset され、次の ▶開始で getSnapshot().phase==='idle' になる。
     expect(timer.resetCallCount).toBe(1);
     expect(timer.getSnapshot().phase).toBe('idle');
     // この時点ではスタート Embed はまだ投稿していない (お疲れさま削除後に投稿)。
     expect(m.startEmbedId).toBeNull();
 
-    // 投稿から 15 秒後: お疲れさま (m3) を削除し、その直後に新スタート Embed を投稿。
+    // 投稿から 15 秒後: お疲れさま (m2) を削除し、その直後に新スタート Embed を投稿。
     await vi.advanceTimersByTimeAsync(15_000);
-    expect(del.mock.calls.map((c) => c[0])).toContain('m3');
+    expect(del.mock.calls.map((c) => c[0])).toContain('m2');
     expect(m.startEmbedId).not.toBeNull();
-    // 削除(m3) → 新スタート post の順 (お疲れさま削除後にスタートを出す)。
-    const m3DeleteOrder = del.mock.calls.findIndex((c) => c[0] === 'm3');
-    expect(m3DeleteOrder).toBeGreaterThanOrEqual(0);
+    // 削除(m2) → 新スタート post の順 (お疲れさま削除後にスタートを出す)。
+    const m2DeleteOrder = del.mock.calls.findIndex((c) => c[0] === 'm2');
+    expect(m2DeleteOrder).toBeGreaterThanOrEqual(0);
     const postIndices = calls.map((c, i) => (c === 'post' ? i : -1)).filter((i) => i >= 0);
     expect(postIndices.length).toBeGreaterThanOrEqual(2);
   });
 
   it('お疲れさま投稿の15秒後削除が失敗しても終了演出 (新スタートEmbed) は完了し例外も伝播しない (best-effort)', async () => {
     const { channel, del } = fakeChannel();
-    // m3 (お疲れさま投稿。post 順は m1=timer / m2=welcome / m3=farewell) の削除だけ失敗させる。
+    // m2 (お疲れさま投稿。post 順は m1=timer / m2=farewell、歓迎投稿は廃止) の削除だけ失敗させる。
     del.mockImplementation((id: string) => {
-      if (id === 'm3') {
+      if (id === 'm2') {
         return Promise.reject(new Error('farewell delete failed'));
       }
       return Promise.resolve();
@@ -549,12 +546,12 @@ describe('EmbedManager 終了演出フロー (US-19)', () => {
 
     // この時点ではスタート Embed はまだ (お疲れさま削除後に投稿)。
     expect(m.startEmbedId).toBeNull();
-    expect(del.mock.calls.map((c) => c[0])).not.toContain('m3');
+    expect(del.mock.calls.map((c) => c[0])).not.toContain('m2');
 
     // 15秒後: お疲れさま削除を試行 → reject するが catch で握りつぶし、その後も
     // スタート Embed 投稿は実行される (削除失敗は後段をブロックしない)。
     await vi.advanceTimersByTimeAsync(15_000);
-    expect(del.mock.calls.map((c) => c[0])).toContain('m3');
+    expect(del.mock.calls.map((c) => c[0])).toContain('m2');
     expect(m.startEmbedId).not.toBeNull();
   });
 
@@ -651,7 +648,7 @@ describe('EmbedManager 終了演出フロー (US-19)', () => {
   });
 });
 
-describe('EmbedManager 歓迎投稿 (welcome message)', () => {
+describe('EmbedManager.postJoinGreeting (VC入室挨拶)', () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -659,113 +656,23 @@ describe('EmbedManager 歓迎投稿 (welcome message)', () => {
     vi.useRealTimers();
   });
 
-  it('onTimerStart で歓迎投稿を post し welcomeMessageId を保持する', async () => {
+  it('表示名入りの挨拶を SuppressNotifications 付きで post する', async () => {
     const { channel, post } = fakeChannel();
-    const timer = new FakeTimer();
-    const m = new EmbedManager({ channel, timer, config, logger });
+    const m = new EmbedManager({ channel, timer: new FakeTimer(), config, logger });
 
-    timer.emit('phaseChange', makeSnapshot('work'));
-    await vi.advanceTimersByTimeAsync(0);
+    await m.postJoinGreeting('たろう');
 
-    const welcomeCall = post.mock.calls.find((c) =>
-      (c[0].content ?? '').includes('ご参加ありがとうございます'),
-    );
-    expect(welcomeCall).toBeDefined();
-    expect(m.welcomeMessageId).not.toBeNull();
+    const greetCall = post.mock.calls.find((c) => (c[0].content ?? '').includes('たろう'));
+    expect(greetCall?.[0].content).toBe('たろうさんよろしくおねがいします！');
+    expect(greetCall?.[0].flags).toBe(MessageFlags.SuppressNotifications);
   });
 
-  it('歓迎投稿は中間フェーズ切替 (work→break) では再 post されない', async () => {
+  it('post 失敗は best-effort (warn のみで例外を伝播させない)', async () => {
     const { channel, post } = fakeChannel();
-    const timer = new FakeTimer();
-    new EmbedManager({ channel, timer, config, logger });
+    post.mockRejectedValueOnce(new Error('post failed'));
+    const m = new EmbedManager({ channel, timer: new FakeTimer(), config, logger });
 
-    timer.emit('phaseChange', makeSnapshot('work'));
-    await vi.advanceTimersByTimeAsync(0);
-    timer.emit('phaseChange', makeSnapshot('break'));
-    await vi.advanceTimersByTimeAsync(0);
-
-    const welcomePostCount = post.mock.calls.filter((c) =>
-      (c[0].content ?? '').includes('ご参加ありがとうございます'),
-    ).length;
-    expect(welcomePostCount).toBe(1);
-  });
-
-  it('countdown 突入 (終了予告音の直後) で歓迎投稿が削除される', async () => {
-    const { channel, del } = fakeChannel();
-    const timer = new FakeTimer();
-    const m = new EmbedManager({ channel, timer, config, logger });
-
-    timer.emit('phaseChange', makeSnapshot('work'));
-    await vi.advanceTimersByTimeAsync(0);
-    const welcomeId = m.welcomeMessageId;
-    expect(welcomeId).not.toBeNull();
-
-    timer.emit('countdown', makeSnapshot('countdown'));
-    await vi.advanceTimersByTimeAsync(0);
-
-    expect(del.mock.calls.map((c) => c[0])).toContain(welcomeId);
-    expect(m.welcomeMessageId).toBeNull();
-  });
-
-  it('onEnded で歓迎投稿が削除され welcomeMessageId は null に戻る', async () => {
-    const { channel, del } = fakeChannel();
-    const timer = new FakeTimer();
-    const m = new EmbedManager({
-      channel,
-      timer,
-      config,
-      logger,
-      endingActions: fakeEndingActions().actions,
-      endingDelay: () => Promise.resolve(),
-    });
-
-    timer.emit('phaseChange', makeSnapshot('work'));
-    await vi.advanceTimersByTimeAsync(0);
-    const welcomeId = m.welcomeMessageId;
-    expect(welcomeId).not.toBeNull();
-
-    timer.emit('ended', makeSnapshot('ended'));
-    await vi.advanceTimersByTimeAsync(0);
-
-    expect(del.mock.calls.map((c) => c[0])).toContain(welcomeId);
-    expect(m.welcomeMessageId).toBeNull();
-  });
-
-  it('onIdle (/pomo stop) でも歓迎投稿が削除される (onEnded を経由しない経路)', async () => {
-    const { channel, del } = fakeChannel();
-    const timer = new FakeTimer();
-    const m = new EmbedManager({ channel, timer, config, logger });
-
-    timer.emit('phaseChange', makeSnapshot('work'));
-    await vi.advanceTimersByTimeAsync(0);
-    const welcomeId = m.welcomeMessageId;
-    expect(welcomeId).not.toBeNull();
-
-    await m.onIdle();
-    expect(del.mock.calls.map((c) => c[0])).toContain(welcomeId);
-    expect(m.welcomeMessageId).toBeNull();
-  });
-
-  it('歓迎投稿の delete 失敗は best-effort (warn のみで例外を伝播させない)', async () => {
-    const { channel, del } = fakeChannel();
-    del.mockImplementation((id: string) => {
-      if (id === 'm2') {
-        return Promise.reject(new Error('welcome delete failed'));
-      }
-      return Promise.resolve();
-    });
-    const timer = new FakeTimer();
-    const m = new EmbedManager({ channel, timer, config, logger });
-
-    timer.emit('phaseChange', makeSnapshot('work'));
-    await vi.advanceTimersByTimeAsync(0);
-    // m1=timerEmbed, m2=welcome。welcomeMessageId は m2。
-    expect(m.welcomeMessageId).toBe('m2');
-
-    // delete 失敗しても onIdle は throw せず idle に戻る。
-    await expect(m.onIdle()).resolves.toBeUndefined();
-    expect(m.welcomeMessageId).toBeNull();
-    expect(m.startEmbedId).not.toBeNull();
+    await expect(m.postJoinGreeting('はなこ')).resolves.toBeUndefined();
   });
 });
 
@@ -819,7 +726,7 @@ describe('EmbedManager 孤児テキスト掃除 / isEnding (監査観察事項1-
     vi.useRealTimers();
   });
 
-  it('isEnding は初期 false、onTimerStart で歓迎/お疲れさまの本文掃除を呼ぶ', async () => {
+  it('isEnding は初期 false、onTimerStart でお疲れさま/23時間終了の本文掃除を呼ぶ', async () => {
     const { channel, purgeOwnTexts } = fakeChannel();
     const timer = new FakeTimer();
     const m = new EmbedManager({ channel, timer, config, logger });
@@ -830,18 +737,20 @@ describe('EmbedManager 孤児テキスト掃除 / isEnding (監査観察事項1-
 
     expect(purgeOwnTexts).toHaveBeenCalledTimes(1);
     const contents = purgeOwnTexts.mock.calls[0]?.[0] ?? [];
-    expect(contents).toContain('お疲れさまでした 👋');
-    expect(contents.some((c) => c.includes('ご参加ありがとうございます'))).toBe(true);
+    expect(contents).toContain(FAREWELL_CONTENT);
+    expect(contents).toContain(TIMEOUT_CONTENT);
+    // 歓迎投稿は廃止したので掃除対象に含めない。
+    expect(contents.some((c) => c.includes('ご参加ありがとうございます'))).toBe(false);
   });
 
-  it('onIdle でも歓迎/お疲れさまの本文掃除を呼ぶ (孤児回収)', async () => {
+  it('onIdle でもお疲れさま/23時間終了の本文掃除を呼ぶ (孤児回収)', async () => {
     const { channel, purgeOwnTexts } = fakeChannel();
     const m = new EmbedManager({ channel, timer: new FakeTimer(), config, logger });
     await m.onIdle();
     expect(purgeOwnTexts).toHaveBeenCalledTimes(1);
   });
 
-  it('purgeOrphanTexts は歓迎/お疲れさまの本文掃除を呼ぶ (起動時クリーンアップ用)', async () => {
+  it('purgeOrphanTexts はお疲れさま/23時間終了の本文掃除を呼ぶ (起動時クリーンアップ用)', async () => {
     const { channel, purgeOwnTexts } = fakeChannel();
     const m = new EmbedManager({ channel, timer: new FakeTimer(), config, logger });
     await m.purgeOrphanTexts();

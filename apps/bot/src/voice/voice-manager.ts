@@ -34,6 +34,19 @@ export function isTargetVcEvent(params: {
   return params.oldChannelId === params.targetVcId || params.newChannelId === params.targetVcId;
 }
 
+/**
+ * 対象 VC への「新規入室」かを判定する純関数。
+ * 未接続 (null) や別 VC から対象 VC へ移ってきた場合に true。
+ * 対象 VC 内でのミュート等の状態変化 (old も new も対象 VC) は false。
+ */
+export function isJoinToTargetVc(params: {
+  oldChannelId: string | null;
+  newChannelId: string | null;
+  targetVcId: string;
+}): boolean {
+  return params.oldChannelId !== params.targetVcId && params.newChannelId === params.targetVcId;
+}
+
 /** VC 接続の最小抽象 (本番は @discordjs/voice の VoiceConnection)。 */
 export interface VoiceConnectionHandle {
   subscribe(player: AudioPlayerLike): unknown;

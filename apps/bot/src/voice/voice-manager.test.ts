@@ -4,6 +4,7 @@ import type { TimerSnapshot } from '@co-working-call/shared';
 import {
   VoiceManager,
   classifyHumanCountTransition,
+  isJoinToTargetVc,
   isTargetVcEvent,
   isTimerRunning,
   type VoiceConnectionHandle,
@@ -73,6 +74,32 @@ describe('isTargetVcEvent', () => {
     );
     expect(isTargetVcEvent({ oldChannelId: 'x', newChannelId: 'y', targetVcId: 'vc' })).toBe(false);
     expect(isTargetVcEvent({ oldChannelId: null, newChannelId: null, targetVcId: 'vc' })).toBe(
+      false,
+    );
+  });
+});
+
+describe('isJoinToTargetVc', () => {
+  it('未接続/別VC から対象 VC への入室は true', () => {
+    expect(isJoinToTargetVc({ oldChannelId: null, newChannelId: 'vc', targetVcId: 'vc' })).toBe(
+      true,
+    );
+    expect(isJoinToTargetVc({ oldChannelId: 'other', newChannelId: 'vc', targetVcId: 'vc' })).toBe(
+      true,
+    );
+  });
+
+  it('対象 VC からの退出・移動、対象 VC 内の状態変化、無関係は false', () => {
+    // 対象 VC → 別VC/退出
+    expect(isJoinToTargetVc({ oldChannelId: 'vc', newChannelId: null, targetVcId: 'vc' })).toBe(
+      false,
+    );
+    // 対象 VC 内での状態変化 (ミュート等: old も new も対象 VC)
+    expect(isJoinToTargetVc({ oldChannelId: 'vc', newChannelId: 'vc', targetVcId: 'vc' })).toBe(
+      false,
+    );
+    // 無関係な VC 間
+    expect(isJoinToTargetVc({ oldChannelId: 'x', newChannelId: 'y', targetVcId: 'vc' })).toBe(
       false,
     );
   });

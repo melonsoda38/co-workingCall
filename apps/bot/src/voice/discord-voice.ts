@@ -9,7 +9,12 @@ import { createDiscordEmbedChannel } from '../discord/discord-embed-channel.js';
 import type { EndingActions } from '../embed/index.js';
 import { createPomodoroSession } from '../session/index.js';
 import type { VoiceSession, VoiceSessionRegistry } from './session-registry.js';
-import { VoiceManager, isTargetVcEvent, type VoiceConnectionHandle } from './voice-manager.js';
+import {
+  VoiceManager,
+  isJoinToTargetVc,
+  isTargetVcEvent,
+  type VoiceConnectionHandle,
+} from './voice-manager.js';
 
 /** VC の人間 (非 bot) メンバー数を数える (voice-spec)。 */
 export function countHumans(channel: VoiceChannel): number {
@@ -61,6 +66,11 @@ async function kickHumansFromVc(
   }
 }
 
+/** 入室挨拶の投稿窓口 (EmbedManager を最小構造で受ける)。 */
+interface JoinGreeter {
+  postJoinGreeting(displayName: string): Promise<void>;
+}
+
 /** voiceStateUpdate を VoiceManager に橋渡しする (bot 自身・無関係 VC は無視)。 */
 function handleVoiceStateUpdate(
   oldState: VoiceState,
@@ -68,6 +78,7 @@ function handleVoiceStateUpdate(
   channel: VoiceChannel,
   targetVcId: string,
   voiceManager: VoiceManager,
+  greeter: JoinGreeter,
 ): void {
   // bot 自身・他 bot のイベントは無視する (voice-spec)。
   if (newState.member?.user.bot ?? false) {
@@ -81,6 +92,19 @@ function handleVoiceStateUpdate(
     })
   ) {
     return;
+  }
+  // 対象 VC への新規入室なら挨拶を投稿する (best-effort)。表示名が取れない場合は投稿しない。
+  if (
+    isJoinToTargetVc({
+      oldChannelId: oldState.channelId,
+      newChannelId: newState.channelId,
+      targetVcId,
+    })
+  ) {
+    const displayName = newState.member?.displayName;
+    if (displayName) {
+      void greeter.postJoinGreeting(displayName);
+    }
   }
   void voiceManager.handleHumanCountChange(countHumans(channel));
 }
@@ -143,12 +167,19 @@ export async function setupVoiceFeature(
   });
   voiceManagerRef.current = voiceManager;
 
-  // 起動時クリーンアップ: 再起動で id 追跡を失った孤児の歓迎/お疲れさまテキストを掃除する
+  // 起動時クリーンアップ: 再起動で id 追跡を失った孤児のお疲れさま等テキストを掃除する
   // (例: ended 直後30秒以内の再起動で残るお疲れさま投稿)。アクティブセッションは無い。
   await session.embedManager.purgeOrphanTexts();
 
   client.on(Events.VoiceStateUpdate, (oldState, newState) => {
-    handleVoiceStateUpdate(oldState, newState, channel, config.voiceChannelId, voiceManager);
+    handleVoiceStateUpdate(
+      oldState,
+      newState,
+      channel,
+      config.voiceChannelId,
+      voiceManager,
+      session.embedManager,
+    );
   });
 
   // 自動スタートスケジューラ。onFire は登録する voiceSession を遅延参照する
