@@ -8,33 +8,25 @@ import {
 } from 'discord.js';
 import type { Logger } from 'pino';
 import type { BotConfig } from '@co-working-call/shared';
-import { loadConfig, saveConfig } from '../config/index.js';
+import {
+  DEFAULT_ADMIN_ROLE_NAME,
+  DEFAULT_AUTO_START,
+  DEFAULT_TIMER_CONFIG,
+  DEFAULT_VOLUME_CONFIG,
+  loadConfig,
+  saveConfig,
+} from '../config/index.js';
 import { purgeOwnEmbeds } from '../discord/purge-embeds.js';
 import { buildStartEmbedMessage } from '../embed/index.js';
 import type { VoiceSession } from '../voice/session-registry.js';
-import {
-  buildAllowedRoleNames,
-  hasAnyAdminRole,
-  isVoiceTextContext,
-  missingBotPermissions,
-} from './checks.js';
+import { buildAllowedRoleNames, hasAnyAdminRole, missingBotPermissions } from './checks.js';
 import { scheduleEphemeralAutoDelete } from './ephemeral.js';
-
-/** config 未存在時の初期タイマー設定 (commands-spec モーダル placeholder: 50/10/2/15 分)。 */
-const DEFAULT_TIMER: BotConfig['default'] = {
-  workSec: 50 * 60,
-  breakSec: 10 * 60,
-  sets: 2,
-  finalBreakSec: 15 * 60,
-};
-
-/** VC 内蔵テキスト欄以外で /pomo 系コマンドを実行したときの共通エラー文言。 */
-const VC_TEXT_ONLY_MESSAGE = 'このコマンドはボイスチャンネル内のテキスト欄で実行してください';
-
-/** 権限不足時の共通エラー文言 (許可ロールを列挙)。 */
-function adminRoleRequiredMessage(allowedRoleNames: readonly string[]): string {
-  return `このコマンドの実行には ${allowedRoleNames.join(' / ')} のいずれかのロールが必要です`;
-}
+import {
+  adminRoleRequiredMessage,
+  requireVoiceAdminSession,
+  respondError,
+  VC_TEXT_ONLY_MESSAGE,
+} from './interaction-helpers.js';
 
 export const pomoCommand = new SlashCommandBuilder()
   .setName('pomo')
@@ -116,7 +108,7 @@ export async function handlePomoInit(
 
     const existing = await loadConfig(configPath);
     const existingConfig = existing.status === 'ok' ? existing.config : null;
-    const adminRoleName = existingConfig?.adminRoleName ?? 'pomo-admin';
+    const adminRoleName = existingConfig?.adminRoleName ?? DEFAULT_ADMIN_ROLE_NAME;
     const adminRoleNames = existingConfig?.adminRoleNames ?? [];
     const allowedRoles = buildAllowedRoleNames(adminRoleName, adminRoleNames);
 
@@ -146,21 +138,15 @@ export async function handlePomoInit(
     }
 
     const config: BotConfig = {
-      default: existingConfig?.default ?? DEFAULT_TIMER,
+      default: existingConfig?.default ?? DEFAULT_TIMER_CONFIG,
       guildId: guild.id,
       voiceChannelId: channel.id,
       adminRoleName,
       adminRoleNames,
       // 既存の音量設定は維持。新規は全音 0dB (原音)。
-      volumes: existingConfig?.volumes ?? {
-        workEnd: 0,
-        breakEnd: 0,
-        finalStart: 0,
-        countdownWarning: 0,
-        finish: 0,
-      },
+      volumes: existingConfig?.volumes ?? DEFAULT_VOLUME_CONFIG,
       // 既存の自動スタート設定は維持。新規は無効 (time=null)。
-      autoStart: existingConfig?.autoStart ?? { time: null, label: '自動スタート' },
+      autoStart: existingConfig?.autoStart ?? DEFAULT_AUTO_START,
     };
     await saveConfig(configPath, config);
     // 新規スタート Embed 投稿の直前に、対象 VC テキスト欄から bot 自身の過去 Embed を掃除
@@ -196,18 +182,7 @@ export async function handlePomoInit(
     logger.info({ guildId: guild.id, voiceChannelId: channel.id }, '/pomo init 完了');
   } catch (err) {
     logger.error({ err }, '/pomo init 処理に失敗しました');
-    try {
-      if (interaction.deferred || interaction.replied) {
-        await interaction.editReply('セットアップに失敗しました。ログを確認してください');
-      } else {
-        await interaction.reply({
-          content: 'セットアップに失敗しました。ログを確認してください',
-          flags: MessageFlags.Ephemeral,
-        });
-      }
-    } catch (replyErr) {
-      logger.error({ err: replyErr }, 'エラー応答にも失敗しました');
-    }
+    await respondError(interaction, 'セットアップに失敗しました。ログを確認してください', logger);
   } finally {
     // /pomo init の ephemeral 応答を 6 時間後に自動削除する。
     scheduleEphemeralAutoDelete(interaction, logger);
@@ -272,37 +247,16 @@ export async function handlePomoStop(
   try {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-    if (!isVoiceTextContext(interaction.channel?.type)) {
-      await interaction.editReply(VC_TEXT_ONLY_MESSAGE);
+    const ctx = await requireVoiceAdminSession({ interaction, session, logger });
+    if (!ctx) {
       return;
     }
-    if (!session) {
-      await interaction.editReply(
-        'セットアップが必要です。/pomo init 実行後に bot を再起動してください',
-      );
-      return;
-    }
-    const guild = interaction.guild;
-    if (!guild) {
-      await interaction.editReply('サーバー内で実行してください');
-      return;
-    }
-
-    const member = await guild.members.fetch(interaction.user.id);
-    const roleNames = member.roles.cache.map((role) => role.name);
-    const allowedRoles = buildAllowedRoleNames(
-      session.config.adminRoleName,
-      session.config.adminRoleNames,
-    );
-    if (!hasAnyAdminRole(roleNames, allowedRoles)) {
-      await interaction.editReply(adminRoleRequiredMessage(allowedRoles));
-      return;
-    }
+    const { guild, session: activeSession } = ctx;
 
     // 強制停止 → VC 退出 → スタート Embed 表示。設定は保持 (timer.stop は config.json を触らない)。
-    session.timer.stop();
-    session.voiceManager.forceDisconnect();
-    await session.embedManager.onIdle();
+    activeSession.timer.stop();
+    activeSession.voiceManager.forceDisconnect();
+    await activeSession.embedManager.onIdle();
 
     // 成功時は確認メッセージを出さない (結果はスタート Embed 再表示で分かる)。
     // 3 秒以内の応答義務を満たすため defer 済みの ephemeral 応答は削除する。
@@ -310,18 +264,7 @@ export async function handlePomoStop(
     logger.info({ guildId: guild.id }, '/pomo stop 実行');
   } catch (err) {
     logger.error({ err }, '/pomo stop 処理に失敗しました');
-    try {
-      if (interaction.deferred || interaction.replied) {
-        await interaction.editReply('停止処理に失敗しました。ログを確認してください');
-      } else {
-        await interaction.reply({
-          content: '停止処理に失敗しました。ログを確認してください',
-          flags: MessageFlags.Ephemeral,
-        });
-      }
-    } catch (replyErr) {
-      logger.error({ err: replyErr }, 'エラー応答にも失敗しました');
-    }
+    await respondError(interaction, '停止処理に失敗しました。ログを確認してください', logger);
   } finally {
     // /pomo stop の ephemeral エラー応答を 6 時間後に自動削除 (成功時は deleteReply 済み = no-op)。
     scheduleEphemeralAutoDelete(interaction, logger);
@@ -344,32 +287,11 @@ export async function handleAdminRole(
   try {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-    if (!isVoiceTextContext(interaction.channel?.type)) {
-      await interaction.editReply(VC_TEXT_ONLY_MESSAGE);
+    const ctx = await requireVoiceAdminSession({ interaction, session, logger });
+    if (!ctx) {
       return;
     }
-    if (!session) {
-      await interaction.editReply(
-        'セットアップが必要です。/pomo init 実行後に bot を再起動してください',
-      );
-      return;
-    }
-    const guild = interaction.guild;
-    if (!guild) {
-      await interaction.editReply('サーバー内で実行してください');
-      return;
-    }
-
-    const member = await guild.members.fetch(interaction.user.id);
-    const roleNames = member.roles.cache.map((role) => role.name);
-    const allowedRoles = buildAllowedRoleNames(
-      session.config.adminRoleName,
-      session.config.adminRoleNames,
-    );
-    if (!hasAnyAdminRole(roleNames, allowedRoles)) {
-      await interaction.editReply(adminRoleRequiredMessage(allowedRoles));
-      return;
-    }
+    const { guild, session: activeSession, allowedRoles } = ctx;
 
     const action = interaction.options.getSubcommand();
     if (action === 'list') {
@@ -379,7 +301,7 @@ export async function handleAdminRole(
 
     // add / remove: 最新 config を基に adminRoleNames を更新し、保存 + セッションへ即反映。
     const loaded = await loadConfig(configPath);
-    const base = loaded.status === 'ok' ? loaded.config : session.config;
+    const base = loaded.status === 'ok' ? loaded.config : activeSession.config;
     const role = interaction.options.getRole('role', true);
     // 許可ロール集合 (基準ロール + 追加ロール、重複除去)。基準ロールは常に先頭。
     const allowed = buildAllowedRoleNames(base.adminRoleName, base.adminRoleNames);
@@ -409,7 +331,7 @@ export async function handleAdminRole(
       updated = { ...base, adminRoleName: newBase, adminRoleNames: rest };
     }
     await saveConfig(configPath, updated);
-    session.config = updated; // 稼働中セッションへ即反映 (再起動不要)
+    activeSession.config = updated; // 稼働中セッションへ即反映 (再起動不要)
 
     const verb = action === 'add' ? '追加' : '削除';
     const current = buildAllowedRoleNames(updated.adminRoleName, updated.adminRoleNames);
@@ -417,18 +339,7 @@ export async function handleAdminRole(
     logger.info({ guildId: guild.id, action, role: role.name }, '/pomo admin-role 実行');
   } catch (err) {
     logger.error({ err }, '/pomo admin-role 処理に失敗しました');
-    try {
-      if (interaction.deferred || interaction.replied) {
-        await interaction.editReply('ロール設定の更新に失敗しました。ログを確認してください');
-      } else {
-        await interaction.reply({
-          content: 'ロール設定の更新に失敗しました。ログを確認してください',
-          flags: MessageFlags.Ephemeral,
-        });
-      }
-    } catch (replyErr) {
-      logger.error({ err: replyErr }, 'エラー応答にも失敗しました');
-    }
+    await respondError(interaction, 'ロール設定の更新に失敗しました。ログを確認してください', logger);
   } finally {
     // /pomo admin-role の ephemeral 応答を 6 時間後に自動削除する。
     scheduleEphemeralAutoDelete(interaction, logger);
@@ -449,32 +360,11 @@ export async function handleAutoLabel(
   try {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-    if (!isVoiceTextContext(interaction.channel?.type)) {
-      await interaction.editReply(VC_TEXT_ONLY_MESSAGE);
+    const ctx = await requireVoiceAdminSession({ interaction, session, logger });
+    if (!ctx) {
       return;
     }
-    if (!session) {
-      await interaction.editReply(
-        'セットアップが必要です。/pomo init 実行後に bot を再起動してください',
-      );
-      return;
-    }
-    const guild = interaction.guild;
-    if (!guild) {
-      await interaction.editReply('サーバー内で実行してください');
-      return;
-    }
-
-    const member = await guild.members.fetch(interaction.user.id);
-    const roleNames = member.roles.cache.map((role) => role.name);
-    const allowedRoles = buildAllowedRoleNames(
-      session.config.adminRoleName,
-      session.config.adminRoleNames,
-    );
-    if (!hasAnyAdminRole(roleNames, allowedRoles)) {
-      await interaction.editReply(adminRoleRequiredMessage(allowedRoles));
-      return;
-    }
+    const { guild, session: activeSession } = ctx;
 
     const text = interaction.options.getString('text', true).trim();
     if (text === '') {
@@ -483,27 +373,16 @@ export async function handleAutoLabel(
     }
 
     const loaded = await loadConfig(configPath);
-    const base = loaded.status === 'ok' ? loaded.config : session.config;
+    const base = loaded.status === 'ok' ? loaded.config : activeSession.config;
     const updated: BotConfig = { ...base, autoStart: { ...base.autoStart, label: text } };
     await saveConfig(configPath, updated);
-    session.config = updated; // 稼働中セッションへ即反映 (再起動不要)
+    activeSession.config = updated; // 稼働中セッションへ即反映 (再起動不要)
 
     await interaction.editReply(`自動スタートのお知らせ文字を「${text}」に設定しました`);
     logger.info({ guildId: guild.id, label: text }, '/pomo auto-label 実行');
   } catch (err) {
     logger.error({ err }, '/pomo auto-label 処理に失敗しました');
-    try {
-      if (interaction.deferred || interaction.replied) {
-        await interaction.editReply('ラベル設定の更新に失敗しました。ログを確認してください');
-      } else {
-        await interaction.reply({
-          content: 'ラベル設定の更新に失敗しました。ログを確認してください',
-          flags: MessageFlags.Ephemeral,
-        });
-      }
-    } catch (replyErr) {
-      logger.error({ err: replyErr }, 'エラー応答にも失敗しました');
-    }
+    await respondError(interaction, 'ラベル設定の更新に失敗しました。ログを確認してください', logger);
   } finally {
     // /pomo auto-label の ephemeral 応答を 6 時間後に自動削除する。
     scheduleEphemeralAutoDelete(interaction, logger);

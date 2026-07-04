@@ -832,16 +832,27 @@ describe('EmbedManager 孤児テキスト掃除 / isEnding (監査観察事項1-
       expect(m.registerContinueUser('u1')).toBe('ok');
     });
 
-    it('続行受付後は countdown 演出 (終了予告音) を抑制する', async () => {
+    it('続行受付後も countdown 演出 (終了予告音) は通常どおり鳴らす', async () => {
       const { timer, sound, m } = setupContinue();
       await reachFinalBreak(timer);
       expect(m.registerContinueUser('u1')).toBe('ok');
       timer.emit('countdown', makeSnapshot('countdown'));
       await vi.advanceTimersByTimeAsync(0);
-      expect(sound.playCountdownWarning).not.toHaveBeenCalled();
+      // 通常終了と同じ演出にするため、続行ありでも終了予告音を鳴らす。
+      expect(sound.playCountdownWarning).toHaveBeenCalledTimes(1);
     });
 
-    it('続行ありの ended は終了演出せず継続ループへ移行する (押した人以外を退出)', async () => {
+    it('countdown 突入後 (まもなく終了) は registerContinueUser が closed を返す', async () => {
+      const { timer, m } = setupContinue();
+      await reachFinalBreak(timer);
+      expect(m.registerContinueUser('u1')).toBe('ok');
+      // countdown で #currentPhase='countdown' → 受付は締め切る (通常と同じく最後の10秒は消す)。
+      timer.emit('countdown', makeSnapshot('countdown'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(m.registerContinueUser('u2')).toBe('closed');
+    });
+
+    it('続行ありの ended は終了演出 (finish.mp3) 後に継続ループへ移行する (押した人以外を退出)', async () => {
       const { timer, sound, ea, m } = setupContinue();
       await reachFinalBreak(timer);
       m.registerContinueUser('u1');
@@ -849,15 +860,16 @@ describe('EmbedManager 孤児テキスト掃除 / isEnding (監査観察事項1-
       timer.emit('ended', makeSnapshot('ended'));
       await vi.advanceTimersByTimeAsync(0);
 
-      // 押していない人だけ退出 (except に u1/u2)、全員退出/bot退出/終了音はしない。
+      // 通常終了と同じく finish.mp3 を鳴らす。
+      expect(sound.playFinish).toHaveBeenCalledTimes(1);
+      // 押していない人だけ退出 (except に u1/u2)、全員退出/bot退出はしない。
       expect(ea.kickHumansExcept).toHaveBeenCalledTimes(1);
       const except = ea.kickHumansExcept.mock.calls[0]?.[0];
       expect(except?.has('u1')).toBe(true);
       expect(except?.has('u2')).toBe(true);
       expect(ea.kickAllHumans).not.toHaveBeenCalled();
       expect(ea.disconnectBot).not.toHaveBeenCalled();
-      expect(sound.playFinish).not.toHaveBeenCalled();
-      // 開始時の作業/休憩秒・元セッションの実施セット数 (4) で継続開始。
+      // finish.mp3・退出の後に、開始時の作業/休憩秒・元セッションの実施セット数 (4) で継続開始。
       expect(timer.startContinuousCalls).toEqual([{ workSec: 1500, breakSec: 300, baseSets: 4 }]);
       expect(m.continuousActive).toBe(true);
     });
@@ -874,7 +886,8 @@ describe('EmbedManager 孤児テキスト掃除 / isEnding (監査観察事項1-
       await m.onEnded('normal');
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(sound.playFinish).toHaveBeenCalledTimes(1);
+      // finish.mp3 は継続移行時 + 実終了時で計 2 回。実終了では全員退出 + bot 退出 + お疲れさま。
+      expect(sound.playFinish).toHaveBeenCalledTimes(2);
       expect(ea.kickAllHumans).toHaveBeenCalledTimes(1);
       expect(ea.disconnectBot).toHaveBeenCalledTimes(1);
       expect(postedContents(fc)).toContain(FAREWELL_CONTENT);
@@ -897,83 +910,6 @@ describe('EmbedManager 孤児テキスト掃除 / isEnding (監査観察事項1-
       expect(timer.startContinuousCalls).toEqual([]);
       expect(m.continuousActive).toBe(false);
       expect(postedContents(fc)).toContain(FAREWELL_CONTENT);
-    });
-
-    /**
-     * #endingDelay を外部から解決できる deferred で差し替えた setup。
-     * #enterContinue の kick 直前グレース (CONTINUE_GRACE_MS) を任意のタイミングで解除でき、
-     * グレース中の遅延登録が残留に反映されるかを検証するために使う。
-     */
-    function setupContinueWithManualGrace() {
-      const fc = fakeChannel();
-      const timer = new FakeTimer();
-      const sound = fakeSound();
-      const ea = fakeEndingActions();
-      let releaseGrace!: () => void;
-      let graceCalls = 0;
-      const m = new EmbedManager({
-        channel: fc.channel,
-        timer,
-        config,
-        logger,
-        soundNotifier: sound.notifier,
-        endingActions: ea.actions,
-        endingDelay: () => {
-          graceCalls += 1;
-          return new Promise<void>((resolve) => {
-            releaseGrace = resolve;
-          });
-        },
-      });
-      return {
-        fc,
-        timer,
-        sound,
-        ea,
-        m,
-        release: () => {
-          releaseGrace();
-        },
-        graceCalls: () => graceCalls,
-      };
-    }
-
-    it('ended 後・kick 前のグレース中に届いた登録も残留に反映される (レース対策の中核)', async () => {
-      const { timer, ea, m, release } = setupContinueWithManualGrace();
-      await reachFinalBreak(timer);
-      // ended 前に u1 が押下。
-      expect(m.registerContinueUser('u1')).toBe('ok');
-      timer.emit('ended', makeSnapshot('ended'));
-      await vi.advanceTimersByTimeAsync(0);
-      // グレース待機中: まだ kick していない。受付は開いたまま (締切前)。
-      expect(ea.kickHumansExcept).not.toHaveBeenCalled();
-      // ended 後にギリギリ届いた u2 の押下もグレース中なら受理される。
-      expect(m.registerContinueUser('u2')).toBe('ok');
-      // グレース解除 → 締切 → kick 実行。except に u1/u2 両方が含まれ、どちらも退出させない。
-      release();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(ea.kickHumansExcept).toHaveBeenCalledTimes(1);
-      const except = ea.kickHumansExcept.mock.calls[0]?.[0];
-      expect(except?.has('u1')).toBe(true);
-      expect(except?.has('u2')).toBe(true);
-      // 移行は 1 回のみ (グレースを挟んでも二重 enterContinue しない)。
-      expect(timer.startContinuousCalls).toHaveLength(1);
-    });
-
-    it('グレース中 (#isEnding=true) でも受付は閉じない / 締切後は closed になる', async () => {
-      const { timer, m, release } = setupContinueWithManualGrace();
-      await reachFinalBreak(timer);
-      m.registerContinueUser('u1');
-      timer.emit('ended', makeSnapshot('ended'));
-      await vi.advanceTimersByTimeAsync(0);
-      // #isEnding は終了演出の二重発火ガード用であり、受付締切とは独立。
-      // グレース中 (isEnding=true) でも受付は開いている = #isEnding 単独では閉じない。
-      expect(m.isEnding).toBe(true);
-      expect(m.registerContinueUser('u2')).toBe('ok');
-      // グレース解除で締切 (#continueRegistrationClosed=true) → 以降は closed。
-      release();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(m.registerContinueUser('u3')).toBe('closed');
     });
 
     it('継続→実終了→新セッションの finalBreak で再び registerContinueUser を受理する', async () => {

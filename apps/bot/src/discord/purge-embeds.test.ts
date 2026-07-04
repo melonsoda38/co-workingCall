@@ -63,7 +63,7 @@ describe('purgeOwnEmbeds', () => {
   it('Embed が無くてもコンポーネント付き (V2 タイマーカード) なら削除する', async () => {
     // 最終休憩/カウントダウンの V2 カードは embeds 0・components ありで来る。
     const v2card = makeMessage({ id: 'v2', authorId: 'BOT', embeds: 0, components: 1 });
-    // Embed もコンポーネントも無い bot のプレーンテキスト (歓迎等) は対象外。
+    // Embed もコンポーネントも無い bot のプレーンテキスト (お疲れさま等) は対象外。
     const plain = makeMessage({ id: 'p', authorId: 'BOT', embeds: 0, components: 0 });
     const humanCard = makeMessage({ id: 'h', authorId: 'USER', embeds: 0, components: 1 });
     const fetch = vi.fn(() => Promise.resolve(collection([v2card, plain, humanCard])));
@@ -103,22 +103,22 @@ describe('purgeOwnEmbeds', () => {
 });
 
 describe('purgeOwnTexts', () => {
-  const WELCOME = 'ご参加ありがとうございます〜\n一緒に作業・勉強よろしくおねがいします。';
+  const NOTICE_A = 'テスト用のお知らせ本文A';
   const FAREWELL = 'お疲れさまでした 👋';
 
   it('bot 自身の指定本文プレーンテキストのみ削除する', async () => {
-    const ownWelcome = makeMessage({ id: 'w', authorId: 'BOT', embeds: 0, content: WELCOME });
+    const ownNoticeA = makeMessage({ id: 'w', authorId: 'BOT', embeds: 0, content: NOTICE_A });
     const ownFarewell = makeMessage({ id: 'f', authorId: 'BOT', embeds: 0, content: FAREWELL });
     const ownOther = makeMessage({ id: 'o', authorId: 'BOT', embeds: 0, content: 'こんにちは' });
     const humanSame = makeMessage({ id: 'h', authorId: 'USER', embeds: 0, content: FAREWELL });
     const fetch = vi.fn(() =>
-      Promise.resolve(collection([ownWelcome, ownFarewell, ownOther, humanSame])),
+      Promise.resolve(collection([ownNoticeA, ownFarewell, ownOther, humanSame])),
     );
     const channel = { messages: { fetch } };
 
-    await purgeOwnTexts(channel, 'BOT', [WELCOME, FAREWELL], logger);
+    await purgeOwnTexts(channel, 'BOT', [NOTICE_A, FAREWELL], logger);
 
-    expect(ownWelcome.delete).toHaveBeenCalledTimes(1);
+    expect(ownNoticeA.delete).toHaveBeenCalledTimes(1);
     expect(ownFarewell.delete).toHaveBeenCalledTimes(1);
     // 本文が対象外の bot メッセージ・同文言の人間メッセージは消さない。
     expect(ownOther.delete).not.toHaveBeenCalled();
@@ -139,11 +139,11 @@ describe('purgeOwnTexts', () => {
       content: FAREWELL,
       deleteImpl: () => Promise.reject(new Error('already deleted')),
     });
-    const ok = makeMessage({ id: 'ok', authorId: 'BOT', embeds: 0, content: WELCOME });
+    const ok = makeMessage({ id: 'ok', authorId: 'BOT', embeds: 0, content: NOTICE_A });
     const fetch = vi.fn(() => Promise.resolve(collection([ng, ok])));
     const channel = { messages: { fetch } };
 
-    await purgeOwnTexts(channel, 'BOT', [WELCOME, FAREWELL], logger);
+    await purgeOwnTexts(channel, 'BOT', [NOTICE_A, FAREWELL], logger);
 
     expect(ng.delete).toHaveBeenCalledTimes(1);
     expect(ok.delete).toHaveBeenCalledTimes(1);

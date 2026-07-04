@@ -10,10 +10,15 @@ import {
 import type { Logger } from 'pino';
 import type { BotConfig, VolumeConfig } from '@co-working-call/shared';
 import { z } from 'zod';
-import { loadConfig, saveConfig } from '../config/index.js';
+import { DEFAULT_VOLUME_CONFIG, saveConfig } from '../config/index.js';
 import type { VoiceSession } from '../voice/session-registry.js';
-import { buildAllowedRoleNames, buttonRoleRequiredMessage, hasAnyAdminRole } from './checks.js';
 import { scheduleEphemeralAutoDelete } from './ephemeral.js';
+import {
+  loadOkConfigOrReplySetup,
+  repostStartEmbedBestEffort,
+  requireConfigAdminForButton,
+  respondError,
+} from './interaction-helpers.js';
 
 export const VOLUME_MODAL_ID = 'pomo_volume_modal';
 export const WORK_END_VOL_ID = 'vol_work_end';
@@ -21,15 +26,6 @@ export const BREAK_END_VOL_ID = 'vol_break_end';
 export const FINAL_START_VOL_ID = 'vol_final_start';
 export const COUNTDOWN_VOL_ID = 'vol_countdown';
 export const FINISH_VOL_ID = 'vol_finish';
-
-/** config 未存在時のフォールバック (全音 0dB = 原音)。 */
-const DEFAULT_VOLUMES: VolumeConfig = {
-  workEnd: 0,
-  breakEnd: 0,
-  finalStart: 0,
-  countdownWarning: 0,
-  finish: 0,
-};
 
 function volumeField(id: string, labelText: string, value: number): LabelBuilder {
   return new LabelBuilder().setLabel(labelText).setTextInputComponent(
@@ -117,33 +113,16 @@ export async function handleVolumeButton(
   configPath: string,
   logger: Logger,
 ): Promise<void> {
-  const replyEphemeral = async (content: string): Promise<void> => {
-    await interaction.reply({ content, flags: MessageFlags.Ephemeral });
-    scheduleEphemeralAutoDelete(interaction, logger);
-  };
-
   try {
-    const guild = interaction.guild;
-    if (!guild) {
-      await replyEphemeral('サーバー内で実行してください');
+    // 認可は設定ボタンと同じ config ベースの許可ロール方式 (config 未確定は pomo-admin フォールバック)。
+    const ctx = await requireConfigAdminForButton({ interaction, configPath, logger });
+    if (!ctx) {
       return;
     }
-
-    const existing = await loadConfig(configPath);
-    const config = existing.status === 'ok' ? existing.config : undefined;
-    const allowedRoles = buildAllowedRoleNames(
-      config?.adminRoleName ?? 'pomo-admin',
-      config?.adminRoleNames ?? [],
-    );
-    const member = await guild.members.fetch(interaction.user.id);
-    const roleNames = member.roles.cache.map((role) => role.name);
-    if (!hasAnyAdminRole(roleNames, allowedRoles)) {
-      await replyEphemeral(buttonRoleRequiredMessage(allowedRoles));
-      return;
-    }
+    const { config } = ctx;
 
     session?.embedManager.adoptStartEmbed(interaction.message.id);
-    const volumes = config?.volumes ?? DEFAULT_VOLUMES;
+    const volumes = config?.volumes ?? DEFAULT_VOLUME_CONFIG;
     await interaction.showModal(buildVolumeModal(volumes));
   } catch (err) {
     logger.error({ err }, '音量設定モーダルの表示に失敗しました');
@@ -177,16 +156,12 @@ export async function handleVolumeModalSubmit(
       return;
     }
 
-    const existing = await loadConfig(configPath);
-    if (existing.status !== 'ok') {
-      await interaction.reply({
-        content: 'セットアップが必要です。先に /pomo init を実行してください',
-        flags: MessageFlags.Ephemeral,
-      });
+    const config = await loadOkConfigOrReplySetup(interaction, configPath);
+    if (!config) {
       return;
     }
 
-    const updated: BotConfig = { ...existing.config, volumes: result.volumes };
+    const updated: BotConfig = { ...config, volumes: result.volumes };
     await saveConfig(configPath, updated);
     await interaction.reply({
       content: '音量設定を保存しました ✅（次のタイマー開始から反映されます）',
@@ -194,28 +169,10 @@ export async function handleVolumeModalSubmit(
     });
     logger.info({ volumes: updated.volumes }, '音量モーダルで config を更新しました');
 
-    if (session) {
-      try {
-        await session.embedManager.repostStartEmbed(updated);
-      } catch (repostErr) {
-        logger.warn(
-          { err: repostErr },
-          'Start Embed の投稿し直しに失敗 (best-effort、config 保存は完了)',
-        );
-      }
-    }
+    await repostStartEmbedBestEffort(session, updated, logger);
   } catch (err) {
     logger.error({ err }, '音量モーダル処理に失敗しました');
-    if (!interaction.replied) {
-      try {
-        await interaction.reply({
-          content: '音量設定の保存に失敗しました。ログを確認してください',
-          flags: MessageFlags.Ephemeral,
-        });
-      } catch (replyErr) {
-        logger.error({ err: replyErr }, 'エラー応答にも失敗しました');
-      }
-    }
+    await respondError(interaction, '音量設定の保存に失敗しました。ログを確認してください', logger);
   } finally {
     scheduleEphemeralAutoDelete(interaction, logger);
   }

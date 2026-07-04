@@ -11,7 +11,7 @@ import type { Logger } from 'pino';
  *
  * 設計方針:
  * - best-effort。fetch/個別 delete の失敗は warn ログのみで投稿処理は止めない。
- * - Embed もコンポーネントも無い bot メッセージ (歓迎/お疲れさまのプレーンテキスト等) は触らない。
+ * - Embed もコンポーネントも無い bot メッセージ (お疲れさま等のプレーンテキスト) は触らない。
  * - fetch 上限 100 件 (Discord API の単発上限)。これで足りない極端な状況は別途対応。
  */
 /** purge 系が必要とするメッセージの最小形状 (discord.js Message 互換)。 */
@@ -61,7 +61,7 @@ export async function purgeOwnEmbeds(
 
 /**
  * VCテキスト欄から bot 自身が投稿した「特定本文のプレーンテキスト」を掃除する。
- * 歓迎 / お疲れさま投稿は Embed なしで purgeOwnEmbeds の対象外。これらは通常 id 追跡で
+ * お疲れさま投稿は Embed なしで purgeOwnEmbeds の対象外。これらは通常 id 追跡で
  * 削除するが、bot 異常終了・再起動で id 追跡を失うと孤児として残る。本文 (content) 完全
  * 一致 + 自分の投稿のみを対象にして、新セッション開始時・idle 復帰時・起動時に掃除する。
  *

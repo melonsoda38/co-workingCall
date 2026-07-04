@@ -10,10 +10,15 @@ import {
 import type { Logger } from 'pino';
 import { TimerConfigSchema, type BotConfig, type TimerConfig } from '@co-working-call/shared';
 import { z } from 'zod';
-import { loadConfig, saveConfig } from '../config/index.js';
+import { DEFAULT_TIMER_CONFIG, saveConfig } from '../config/index.js';
 import type { VoiceSession } from '../voice/session-registry.js';
-import { buildAllowedRoleNames, buttonRoleRequiredMessage, hasAnyAdminRole } from './checks.js';
 import { scheduleEphemeralAutoDelete } from './ephemeral.js';
+import {
+  loadOkConfigOrReplySetup,
+  repostStartEmbedBestEffort,
+  requireConfigAdminForButton,
+  respondError,
+} from './interaction-helpers.js';
 
 export const SETTINGS_MODAL_ID = 'pomo_settings_modal';
 export const WORK_MIN_ID = 'work_min';
@@ -25,14 +30,6 @@ export const AUTO_START_TIME_ID = 'auto_start_time';
 /** 自動スタート時刻の入力形式 (JST "HH:MM" 24時間表記)。 */
 const AUTO_START_TIME_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
 const AUTO_START_TIME_ERROR = '自動スタート時刻はHH:MM形式（例 07:30）で入力してください';
-
-/** config 未存在時のフォールバック (commands-spec モーダル placeholder: 50/10/2/15 分)。 */
-const DEFAULT_TIMER: TimerConfig = {
-  workSec: 50 * 60,
-  breakSec: 10 * 60,
-  sets: 2,
-  finalBreakSec: 15 * 60,
-};
 
 function labelField(id: string, labelText: string, value: string, maxLength: number): LabelBuilder {
   return new LabelBuilder()
@@ -181,35 +178,17 @@ export async function handleSettingsButton(
   configPath: string,
   logger: Logger,
 ): Promise<void> {
-  const replyEphemeral = async (content: string): Promise<void> => {
-    await interaction.reply({ content, flags: MessageFlags.Ephemeral });
-    scheduleEphemeralAutoDelete(interaction, logger);
-  };
-
   try {
-    const guild = interaction.guild;
-    if (!guild) {
-      await replyEphemeral('サーバー内で実行してください');
-      return;
-    }
-
-    // 許可ロールは config から決める (session 未注入=READY 前 でも判定できるよう
+    // 許可ロールは config から判定する (session 未注入=READY 前 でも判定できるよう
     // loadConfig を基準にする)。config 未確定時は基準ロール pomo-admin にフォールバック。
-    const existing = await loadConfig(configPath);
-    const config = existing.status === 'ok' ? existing.config : undefined;
-    const allowedRoles = buildAllowedRoleNames(
-      config?.adminRoleName ?? 'pomo-admin',
-      config?.adminRoleNames ?? [],
-    );
-    const member = await guild.members.fetch(interaction.user.id);
-    const roleNames = member.roles.cache.map((role) => role.name);
-    if (!hasAnyAdminRole(roleNames, allowedRoles)) {
-      await replyEphemeral(buttonRoleRequiredMessage(allowedRoles));
+    const ctx = await requireConfigAdminForButton({ interaction, configPath, logger });
+    if (!ctx) {
       return;
     }
+    const { config } = ctx;
 
     session?.embedManager.adoptStartEmbed(interaction.message.id);
-    const timer = config?.default ?? DEFAULT_TIMER;
+    const timer = config?.default ?? DEFAULT_TIMER_CONFIG;
     const autoStartTime = config?.autoStart.time ?? null;
     await interaction.showModal(buildSettingsModal(timer, autoStartTime));
   } catch (err) {
@@ -247,19 +226,15 @@ export async function handleSettingsModalSubmit(
       return;
     }
 
-    const existing = await loadConfig(configPath);
-    if (existing.status !== 'ok') {
-      await interaction.reply({
-        content: 'セットアップが必要です。先に /pomo init を実行してください',
-        flags: MessageFlags.Ephemeral,
-      });
+    const config = await loadOkConfigOrReplySetup(interaction, configPath);
+    if (!config) {
       return;
     }
 
     const updated: BotConfig = {
-      ...existing.config,
+      ...config,
       default: result.timer,
-      autoStart: { ...existing.config.autoStart, time: result.autoStartTime },
+      autoStart: { ...config.autoStart, time: result.autoStartTime },
     };
     await saveConfig(configPath, updated);
     // 自動スタート時刻の変更を稼働中スケジューラへ即反映 (再起動不要)。
@@ -276,28 +251,10 @@ export async function handleSettingsModalSubmit(
     // 最新 config で Start Embed を投稿し直す (ephemeral 応答後に実行し、
     // チャンネル最下部に最新版 Embed を露出させる)。
     // session 不在 (READY 前) or 失敗時は warn のみ・ユーザー応答は成功扱いのまま。
-    if (session) {
-      try {
-        await session.embedManager.repostStartEmbed(updated);
-      } catch (repostErr) {
-        logger.warn(
-          { err: repostErr },
-          'Start Embed の投稿し直しに失敗 (best-effort、config 保存は完了)',
-        );
-      }
-    }
+    await repostStartEmbedBestEffort(session, updated, logger);
   } catch (err) {
     logger.error({ err }, '設定モーダル処理に失敗しました');
-    if (!interaction.replied) {
-      try {
-        await interaction.reply({
-          content: '設定の保存に失敗しました。ログを確認してください',
-          flags: MessageFlags.Ephemeral,
-        });
-      } catch (replyErr) {
-        logger.error({ err: replyErr }, 'エラー応答にも失敗しました');
-      }
-    }
+    await respondError(interaction, '設定の保存に失敗しました。ログを確認してください', logger);
   } finally {
     // 設定モーダル送信の ephemeral 応答を 14 分後に自動削除する。
     scheduleEphemeralAutoDelete(interaction, logger);

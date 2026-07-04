@@ -76,53 +76,56 @@ export async function startBot(token: string, logger: Logger, configPath: string
   });
 
   client.on(Events.InteractionCreate, (interaction) => {
+    // guild スコープのセッションは一度だけ解決する (button/modal/command 共通)。
+    const session = interaction.guildId ? sessions.get(interaction.guildId) : undefined;
+
     if (interaction.isChatInputCommand()) {
-      if (interaction.commandName === 'pomo') {
-        const group = interaction.options.getSubcommandGroup(false);
-        const sub = interaction.options.getSubcommand(false);
-        const session = interaction.guildId ? sessions.get(interaction.guildId) : undefined;
-        if (group === 'admin-role') {
-          void handleAdminRole(interaction, session, configPath, logger);
-        } else if (sub === 'init') {
-          void handlePomoInit(interaction, session, configPath, logger);
-        } else if (sub === 'stop') {
-          void handlePomoStop(interaction, session, logger);
-        } else if (sub === 'auto-label') {
-          void handleAutoLabel(interaction, session, configPath, logger);
-        } else if (sub === 'help') {
-          void handlePomoHelp(interaction, session, configPath, logger);
-        }
+      if (interaction.commandName !== 'pomo') {
+        return;
+      }
+      const group = interaction.options.getSubcommandGroup(false);
+      const sub = interaction.options.getSubcommand(false);
+      if (group === 'admin-role') {
+        void handleAdminRole(interaction, session, configPath, logger);
+      } else if (sub === 'init') {
+        void handlePomoInit(interaction, session, configPath, logger);
+      } else if (sub === 'stop') {
+        void handlePomoStop(interaction, session, logger);
+      } else if (sub === 'auto-label') {
+        void handleAutoLabel(interaction, session, configPath, logger);
+      } else if (sub === 'help') {
+        void handlePomoHelp(interaction, session, configPath, logger);
       }
       return;
     }
-    if (interaction.isButton() && interaction.customId === START_BUTTON_ID) {
-      const session = interaction.guildId ? sessions.get(interaction.guildId) : undefined;
-      void handleStartButton(interaction, session, configPath, logger);
+
+    if (interaction.isButton()) {
+      switch (interaction.customId) {
+        case START_BUTTON_ID:
+          void handleStartButton(interaction, session, configPath, logger);
+          break;
+        case CONTINUE_BUTTON_ID:
+          void handleContinueButton(interaction, session, logger);
+          break;
+        case SETTINGS_BUTTON_ID:
+          void handleSettingsButton(interaction, session, configPath, logger);
+          break;
+        case VOLUME_BUTTON_ID:
+          void handleVolumeButton(interaction, session, configPath, logger);
+          break;
+      }
       return;
     }
-    if (interaction.isButton() && interaction.customId === CONTINUE_BUTTON_ID) {
-      const session = interaction.guildId ? sessions.get(interaction.guildId) : undefined;
-      void handleContinueButton(interaction, session, logger);
-      return;
-    }
-    if (interaction.isButton() && interaction.customId === SETTINGS_BUTTON_ID) {
-      const session = interaction.guildId ? sessions.get(interaction.guildId) : undefined;
-      void handleSettingsButton(interaction, session, configPath, logger);
-      return;
-    }
-    if (interaction.isModalSubmit() && interaction.customId === SETTINGS_MODAL_ID) {
-      const session = interaction.guildId ? sessions.get(interaction.guildId) : undefined;
-      void handleSettingsModalSubmit(interaction, session, configPath, logger);
-      return;
-    }
-    if (interaction.isButton() && interaction.customId === VOLUME_BUTTON_ID) {
-      const session = interaction.guildId ? sessions.get(interaction.guildId) : undefined;
-      void handleVolumeButton(interaction, session, configPath, logger);
-      return;
-    }
-    if (interaction.isModalSubmit() && interaction.customId === VOLUME_MODAL_ID) {
-      const session = interaction.guildId ? sessions.get(interaction.guildId) : undefined;
-      void handleVolumeModalSubmit(interaction, session, configPath, logger);
+
+    if (interaction.isModalSubmit()) {
+      switch (interaction.customId) {
+        case SETTINGS_MODAL_ID:
+          void handleSettingsModalSubmit(interaction, session, configPath, logger);
+          break;
+        case VOLUME_MODAL_ID:
+          void handleVolumeModalSubmit(interaction, session, configPath, logger);
+          break;
+      }
       return;
     }
   });
