@@ -266,6 +266,63 @@ describe('VoiceManager', () => {
     expect(destroy).toHaveBeenCalledTimes(1); // CD は発火しない
   });
 
+  it('自動スタートセッションは 1+→0 でも空 VC 退出を抑止し接続を維持する', async () => {
+    const { vm, triggerEndingFlow, resetToIdle, destroy } = setup({
+      phase: 'work',
+      withTriggerEndingFlow: true,
+    });
+    await vm.handleHumanCountChange(1); // 接続
+    vm.markAutoStartedSession(); // 自動スタート由来として抑止を有効化
+    await vm.handleHumanCountChange(0); // 人間ゼロ
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    // 退出カウントダウンを arm しないため終了演出も暗定復帰も走らず、bot は残る。
+    expect(triggerEndingFlow).not.toHaveBeenCalled();
+    expect(resetToIdle).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
+    expect(vm.connected).toBe(true);
+  });
+
+  it('clearAutoStartedSession で抑止解除後は 1+→0 で通常どおり終了演出が走る', async () => {
+    const { vm, triggerEndingFlow } = setup({ phase: 'work', withTriggerEndingFlow: true });
+    await vm.handleHumanCountChange(1);
+    vm.markAutoStartedSession();
+    vm.clearAutoStartedSession(); // 設定サイクル終了 (timer 'ended') 相当
+    await vm.handleHumanCountChange(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(triggerEndingFlow).toHaveBeenCalledTimes(1);
+  });
+
+  it('markAutoStartedSession は arm 済みの退出カウントダウンをキャンセルする', async () => {
+    const { vm, triggerEndingFlow, resetToIdle } = setup({
+      phase: 'work',
+      withTriggerEndingFlow: true,
+    });
+    await vm.handleHumanCountChange(1);
+    await vm.handleHumanCountChange(0); // 手動状態で退出CD arm
+    vm.markAutoStartedSession(); // 割り込み: 抑止有効化 + arm 済みCDキャンセル
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(triggerEndingFlow).not.toHaveBeenCalled();
+    expect(resetToIdle).not.toHaveBeenCalled();
+    expect(vm.connected).toBe(true);
+  });
+
+  it('forceDisconnect (実退出) 後は自動スタート抑止を次セッションへ持ち越さない', async () => {
+    const { vm, triggerEndingFlow } = setup({ phase: 'work', withTriggerEndingFlow: true });
+    await vm.handleHumanCountChange(1);
+    vm.markAutoStartedSession();
+    vm.forceDisconnect(); // #disconnect でフラグ解除
+
+    await vm.handleHumanCountChange(0); // 1→0 だが未接続のため no-op
+    await vm.handleHumanCountChange(1); // 0→1 再接続 (新セッション相当・フラグ false)
+    await vm.handleHumanCountChange(0); // 1→0 → 通常の退出CD
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(triggerEndingFlow).toHaveBeenCalledTimes(1);
+  });
+
   it('US-21: #onLeave で退出カウントダウン開始の info ログを出す', async () => {
     const { vm } = setup();
     await vm.handleHumanCountChange(1);

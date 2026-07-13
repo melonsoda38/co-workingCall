@@ -52,6 +52,9 @@ export async function runAutoStart(
 
     // タイマー開始。phaseChange(work) で EmbedManager がタイマー Embed を投稿する。
     session.timer.start(config.default);
+    // 自動スタート由来のセッションであることを VoiceManager に通知し、以降このサイクルが
+    // 終了するまで「VC 人間ゼロによる自動退出」を抑止する (無人でも最後まで継続させる)。
+    session.voiceManager.markAutoStartedSession();
     logger.info({ guildId: config.guildId, default: config.default }, '自動スタートでタイマー開始');
   } catch (err) {
     logger.error({ err }, '自動スタートの実行に失敗しました');

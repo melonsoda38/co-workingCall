@@ -105,6 +105,11 @@ export class VoiceManager {
   #humanCount = 0;
   #connection: VoiceConnectionHandle | null = null;
   #emptyVcTimeout: NodeJS.Timeout | null = null;
+  /**
+   * 現在の稼働セッションが自動スタート由来かどうか。true の間は「VC 人間ゼロ」による
+   * 30 秒退出を抑止し、設定サイクルが終了する (timer 'ended' で解除) まで bot を残す。
+   */
+  #autoStarted = false;
 
   constructor(deps: VoiceManagerDeps) {
     this.#logger = deps.logger;
@@ -143,6 +148,25 @@ export class VoiceManager {
    */
   async ensureConnected(): Promise<boolean> {
     return this.#connectAndInit();
+  }
+
+  /**
+   * 自動スタート由来のセッション開始を通知する (runAutoStart から呼ぶ)。以降このセッションが
+   * 終了 (設定サイクル完了で clearAutoStartedSession、または実退出で #disconnect) するまで、
+   * VC 人間ゼロによる 30 秒退出を抑止する。直前まで手動セッションで arm 済みだった退出
+   * カウントダウンが割り込みで残り新セッションを誤って終わらせないよう、ここで併せて解除する。
+   */
+  markAutoStartedSession(): void {
+    this.#autoStarted = true;
+    this.#cancelEmptyTimeout();
+  }
+
+  /**
+   * 自動スタート由来の抑止を解除する (設定サイクル終了 = timer 'ended' 時に呼ぶ)。
+   * 以降 (「続行」による継続ループ等) は手動セッションと同じ空 VC 退出挙動に戻る。
+   */
+  clearAutoStartedSession(): void {
+    this.#autoStarted = false;
   }
 
   async #onEnter(): Promise<void> {
@@ -191,6 +215,13 @@ export class VoiceManager {
       // 再発火させる取りこぼしを防ぐ。
       return;
     }
+    if (this.#autoStarted) {
+      // 自動スタート由来のセッションは、人間ゼロでも設定サイクルが終わるまで継続する。
+      // 退出カウントダウンを arm せず、bot を VC に残す (終了・退出は自然終了時の
+      // onEnded 経路に委ねる。人間ゼロでの終了処理は 1 人以上いた場合と同一)。
+      this.#logger.info('自動スタートセッションのため空 VC 自動退出を抑止 (サイクル終了まで継続)');
+      return;
+    }
     this.#logger.info(
       { timeoutMs: this.#emptyVcTimeoutMs },
       '人間ゼロを検知。退出カウントダウンを開始 (この間に再入室があればキャンセル)',
@@ -236,6 +267,9 @@ export class VoiceManager {
       this.#connection.destroy();
       this.#connection = null;
     }
+    // bot が実際に退出したら自動スタート由来の抑止も必ず解く。/pomo stop (forceDisconnect)・
+    // 空 VC idle 退出など timer 'ended' を経由しない退出でもフラグが持ち越さないようにする。
+    this.#autoStarted = false;
   }
 
   #cancelEmptyTimeout(): void {

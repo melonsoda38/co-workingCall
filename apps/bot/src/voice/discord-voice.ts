@@ -167,6 +167,13 @@ export async function setupVoiceFeature(
   });
   voiceManagerRef.current = voiceManager;
 
+  // 設定サイクルが完了 (timer 'ended') した時点で自動スタート由来の抑止を解除する。
+  // これにより「続行」で継続ループへ移行した場合は、以降は手動セッションと同じ空 VC 退出挙動に戻る。
+  // (EmbedManager も同 'ended' を購読しており多重リスナは問題ない。)
+  session.timer.on('ended', () => {
+    voiceManager.clearAutoStartedSession();
+  });
+
   // 起動時クリーンアップ: 再起動で id 追跡を失った孤児のお疲れさま等テキストを掃除する
   // (例: ended 直後30秒以内の再起動で残るお疲れさま投稿)。アクティブセッションは無い。
   await session.embedManager.purgeOrphanTexts();

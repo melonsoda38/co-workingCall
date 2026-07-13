@@ -32,6 +32,7 @@ interface Mocks {
   ensureConnected: ReturnType<typeof vi.fn>;
   applyConfig: ReturnType<typeof vi.fn>;
   setVolumes: ReturnType<typeof vi.fn>;
+  markAutoStartedSession: ReturnType<typeof vi.fn>;
 }
 
 function makeSession(opts: {
@@ -46,6 +47,7 @@ function makeSession(opts: {
     ensureConnected: vi.fn(() => Promise.resolve(opts.ensureConnectedResult ?? true)),
     applyConfig: vi.fn(),
     setVolumes: vi.fn(),
+    markAutoStartedSession: vi.fn(),
   };
   const session = {
     config: baseConfig,
@@ -59,7 +61,10 @@ function makeSession(opts: {
       resetForRestart: mocks.resetForRestart,
       applyConfig: mocks.applyConfig,
     },
-    voiceManager: { ensureConnected: mocks.ensureConnected },
+    voiceManager: {
+      ensureConnected: mocks.ensureConnected,
+      markAutoStartedSession: mocks.markAutoStartedSession,
+    },
     soundPlayer: { setVolumes: mocks.setVolumes },
   } as unknown as VoiceSession;
   return { session, mocks };
@@ -88,6 +93,8 @@ describe('runAutoStart', () => {
     expect(mocks.applyConfig).toHaveBeenCalledWith(baseConfig);
     expect(mocks.setVolumes).toHaveBeenCalledWith(baseConfig.volumes);
     expect(mocks.start).toHaveBeenCalledWith(baseConfig.default);
+    // 自動スタート由来として VoiceManager に通知する (空 VC 自動退出の抑止)。
+    expect(mocks.markAutoStartedSession).toHaveBeenCalledTimes(1);
   });
 
   it('稼働中 (work) 時: お知らせ投稿 → リセット → 開始の順で実行する', async () => {
@@ -122,6 +129,8 @@ describe('runAutoStart', () => {
     expect(mocks.ensureConnected).toHaveBeenCalledTimes(1);
     expect(mocks.applyConfig).not.toHaveBeenCalled();
     expect(mocks.start).not.toHaveBeenCalled();
+    // 開始しなかったので抑止通知も行わない。
+    expect(mocks.markAutoStartedSession).not.toHaveBeenCalled();
   });
 
   it('config が無効ならログのみで何もしない', async () => {
