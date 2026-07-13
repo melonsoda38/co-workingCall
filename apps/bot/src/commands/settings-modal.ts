@@ -1,24 +1,17 @@
 import {
   ButtonInteraction,
   LabelBuilder,
-  MessageFlags,
   ModalBuilder,
   ModalSubmitInteraction,
   TextInputBuilder,
   TextInputStyle,
 } from 'discord.js';
 import type { Logger } from 'pino';
-import { TimerConfigSchema, type BotConfig, type TimerConfig } from '@co-working-call/shared';
+import { TimerConfigSchema, type TimerConfig } from '@co-working-call/shared';
 import { z } from 'zod';
-import { DEFAULT_TIMER_CONFIG, saveConfig } from '../config/index.js';
+import { DEFAULT_TIMER_CONFIG } from '../config/index.js';
 import type { VoiceSession } from '../voice/session-registry.js';
-import { scheduleEphemeralAutoDelete } from './ephemeral.js';
-import {
-  loadOkConfigOrReplySetup,
-  repostStartEmbedBestEffort,
-  requireConfigAdminForButton,
-  respondError,
-} from './interaction-helpers.js';
+import { requireConfigAdminForButton, runConfigModalSubmit } from './interaction-helpers.js';
 
 export const SETTINGS_MODAL_ID = 'pomo_settings_modal';
 export const WORK_MIN_ID = 'work_min';
@@ -175,13 +168,13 @@ export function parseSettingsModalInput(raw: {
 export async function handleSettingsButton(
   interaction: ButtonInteraction,
   session: VoiceSession | undefined,
-  configPath: string,
+  configDir: string,
   logger: Logger,
 ): Promise<void> {
   try {
     // 許可ロールは config から判定する (session 未注入=READY 前 でも判定できるよう
-    // loadConfig を基準にする)。config 未確定時は基準ロール pomo-admin にフォールバック。
-    const ctx = await requireConfigAdminForButton({ interaction, configPath, logger });
+    // per-guild ファイルを基準にする)。config 未確定時は基準ロール pomo-admin にフォールバック。
+    const ctx = await requireConfigAdminForButton({ interaction, configDir, logger });
     if (!ctx) {
       return;
     }
@@ -207,56 +200,36 @@ export async function handleSettingsButton(
 export async function handleSettingsModalSubmit(
   interaction: ModalSubmitInteraction,
   session: VoiceSession | undefined,
-  configPath: string,
+  configDir: string,
   logger: Logger,
 ): Promise<void> {
-  try {
-    const result = parseSettingsModalInput({
-      workMin: interaction.fields.getTextInputValue(WORK_MIN_ID),
-      breakMin: interaction.fields.getTextInputValue(BREAK_MIN_ID),
-      sets: interaction.fields.getTextInputValue(SETS_ID),
-      finalMin: interaction.fields.getTextInputValue(FINAL_MIN_ID),
-      autoStartTime: interaction.fields.getTextInputValue(AUTO_START_TIME_ID),
-    });
-    if (!result.ok) {
-      await interaction.reply({
-        content: result.errors.join('\n'),
-        flags: MessageFlags.Ephemeral,
+  await runConfigModalSubmit({
+    interaction,
+    session,
+    configDir,
+    logger,
+    parse: () => {
+      const r = parseSettingsModalInput({
+        workMin: interaction.fields.getTextInputValue(WORK_MIN_ID),
+        breakMin: interaction.fields.getTextInputValue(BREAK_MIN_ID),
+        sets: interaction.fields.getTextInputValue(SETS_ID),
+        finalMin: interaction.fields.getTextInputValue(FINAL_MIN_ID),
+        autoStartTime: interaction.fields.getTextInputValue(AUTO_START_TIME_ID),
       });
-      return;
-    }
-
-    const config = await loadOkConfigOrReplySetup(interaction, configPath);
-    if (!config) {
-      return;
-    }
-
-    const updated: BotConfig = {
+      return r.ok ? { ok: true, value: r } : r;
+    },
+    buildUpdated: (config, value) => ({
       ...config,
-      default: result.timer,
-      autoStart: { ...config.autoStart, time: result.autoStartTime },
-    };
-    await saveConfig(configPath, updated);
+      default: value.timer,
+      autoStart: { ...config.autoStart, time: value.autoStartTime },
+    }),
     // 自動スタート時刻の変更を稼働中スケジューラへ即反映 (再起動不要)。
-    session?.autoStartScheduler.schedule(updated.autoStart.time);
-    await interaction.reply({
-      content: '設定を保存しました ✅',
-      flags: MessageFlags.Ephemeral,
-    });
-    logger.info(
-      { default: updated.default, autoStart: updated.autoStart },
-      '設定モーダルで config を更新しました',
-    );
-
-    // 最新 config で Start Embed を投稿し直す (ephemeral 応答後に実行し、
-    // チャンネル最下部に最新版 Embed を露出させる)。
-    // session 不在 (READY 前) or 失敗時は warn のみ・ユーザー応答は成功扱いのまま。
-    await repostStartEmbedBestEffort(session, updated, logger);
-  } catch (err) {
-    logger.error({ err }, '設定モーダル処理に失敗しました');
-    await respondError(interaction, '設定の保存に失敗しました。ログを確認してください', logger);
-  } finally {
-    // 設定モーダル送信の ephemeral 応答を 14 分後に自動削除する。
-    scheduleEphemeralAutoDelete(interaction, logger);
-  }
+    afterSave: (updated, activeSession) =>
+      activeSession?.autoStartScheduler.schedule(updated.autoStart.time),
+    successMessage: '設定を保存しました ✅',
+    errorMessage: '設定の保存に失敗しました。ログを確認してください',
+    errorLogMessage: '設定モーダル処理に失敗しました',
+    logMessage: '設定モーダルで config を更新しました',
+    logContext: (updated) => ({ default: updated.default, autoStart: updated.autoStart }),
+  });
 }

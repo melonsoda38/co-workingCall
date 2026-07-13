@@ -12,8 +12,16 @@ import {
   pomoCommand,
 } from './pomo.js';
 
-vi.mock('../config/index.js', () => ({ loadConfig: vi.fn(), saveConfig: vi.fn() }));
-import { loadConfig, saveConfig } from '../config/index.js';
+vi.mock('../config/index.js', () => ({
+  loadVcConfig: vi.fn(),
+  saveVcConfig: vi.fn(),
+  loadGuildConfigFile: vi.fn(),
+  DEFAULT_ADMIN_ROLE_NAME: 'pomo-admin',
+  DEFAULT_AUTO_START: { time: null, label: '自動スタート' },
+  DEFAULT_TIMER_CONFIG: { workSec: 3000, breakSec: 600, sets: 2, finalBreakSec: 900 },
+  DEFAULT_VOLUME_CONFIG: { workEnd: 0, breakEnd: 0, finalStart: 0, countdownWarning: 0, finish: 0 },
+}));
+import { loadGuildConfigFile, loadVcConfig, saveVcConfig } from '../config/index.js';
 
 const logger = {
   error: vi.fn(),
@@ -143,8 +151,8 @@ describe('handlePomoStop', () => {
 
 describe('handleAdminRole', () => {
   beforeEach(() => {
-    vi.mocked(loadConfig).mockResolvedValue({ status: 'ok', config: { ...CONFIG } });
-    vi.mocked(saveConfig).mockResolvedValue(undefined);
+    vi.mocked(loadVcConfig).mockResolvedValue({ status: 'ok', config: { ...CONFIG } });
+    vi.mocked(saveVcConfig).mockResolvedValue(undefined);
   });
   afterEach(() => {
     vi.clearAllMocks();
@@ -159,7 +167,7 @@ describe('handleAdminRole', () => {
     expect(editReply).toHaveBeenCalledWith(
       'このコマンドはボイスチャンネル内のテキスト欄で実行してください',
     );
-    expect(saveConfig).not.toHaveBeenCalled();
+    expect(saveVcConfig).not.toHaveBeenCalled();
   });
 
   it('権限が無ければ拒否し保存しない', async () => {
@@ -170,7 +178,7 @@ describe('handleAdminRole', () => {
     const { session } = makeSession();
     await handleAdminRole(interaction, session, 'cfg.json', logger);
     expect(editReply).toHaveBeenCalledTimes(1);
-    expect(saveConfig).not.toHaveBeenCalled();
+    expect(saveVcConfig).not.toHaveBeenCalled();
   });
 
   it('list: 現在の許可ロールを表示する', async () => {
@@ -180,7 +188,7 @@ describe('handleAdminRole', () => {
     const { session } = makeSession();
     await handleAdminRole(interaction, session, 'cfg.json', logger);
     expect(editReply).toHaveBeenCalledWith(expect.stringContaining('pomo-admin'));
-    expect(saveConfig).not.toHaveBeenCalled();
+    expect(saveVcConfig).not.toHaveBeenCalled();
   });
 
   it('add: ロールを追加し保存・セッションへ反映する', async () => {
@@ -190,7 +198,7 @@ describe('handleAdminRole', () => {
     });
     const { session } = makeSession();
     await handleAdminRole(interaction, session, 'cfg.json', logger);
-    expect(saveConfig).toHaveBeenCalledWith(
+    expect(saveVcConfig).toHaveBeenCalledWith(
       'cfg.json',
       expect.objectContaining({ adminRoleNames: ['mod'] }),
     );
@@ -198,7 +206,7 @@ describe('handleAdminRole', () => {
   });
 
   it('remove: 登録済みロールを外して保存する', async () => {
-    vi.mocked(loadConfig).mockResolvedValue({
+    vi.mocked(loadVcConfig).mockResolvedValue({
       status: 'ok',
       config: { ...CONFIG, adminRoleNames: ['mod'] },
     });
@@ -208,14 +216,14 @@ describe('handleAdminRole', () => {
     });
     const { session } = makeSession();
     await handleAdminRole(interaction, session, 'cfg.json', logger);
-    expect(saveConfig).toHaveBeenCalledWith(
+    expect(saveVcConfig).toHaveBeenCalledWith(
       'cfg.json',
       expect.objectContaining({ adminRoleNames: [] }),
     );
   });
 
   it('remove: 基準ロールも追加ロールが残るなら外せ、残りの先頭を基準に繰り上げる', async () => {
-    vi.mocked(loadConfig).mockResolvedValue({
+    vi.mocked(loadVcConfig).mockResolvedValue({
       status: 'ok',
       config: { ...CONFIG, adminRoleNames: ['study-lead'] },
     });
@@ -225,7 +233,7 @@ describe('handleAdminRole', () => {
     });
     const { session } = makeSession();
     await handleAdminRole(interaction, session, 'cfg.json', logger);
-    expect(saveConfig).toHaveBeenCalledWith(
+    expect(saveVcConfig).toHaveBeenCalledWith(
       'cfg.json',
       expect.objectContaining({ adminRoleName: 'study-lead', adminRoleNames: [] }),
     );
@@ -233,7 +241,7 @@ describe('handleAdminRole', () => {
   });
 
   it('remove: 許可ロールが 1 つだけのときは外せず保存しない', async () => {
-    vi.mocked(loadConfig).mockResolvedValue({ status: 'ok', config: { ...CONFIG } });
+    vi.mocked(loadVcConfig).mockResolvedValue({ status: 'ok', config: { ...CONFIG } });
     const { interaction, editReply } = makeInteraction(['pomo-admin'], ChannelType.GuildVoice, {
       subcommand: 'remove',
       roleName: 'pomo-admin',
@@ -241,14 +249,14 @@ describe('handleAdminRole', () => {
     const { session } = makeSession();
     await handleAdminRole(interaction, session, 'cfg.json', logger);
     expect(editReply).toHaveBeenCalledWith(expect.stringContaining('唯一の許可ロール'));
-    expect(saveConfig).not.toHaveBeenCalled();
+    expect(saveVcConfig).not.toHaveBeenCalled();
   });
 });
 
 describe('handleAutoLabel', () => {
   beforeEach(() => {
-    vi.mocked(loadConfig).mockResolvedValue({ status: 'ok', config: { ...CONFIG } });
-    vi.mocked(saveConfig).mockResolvedValue(undefined);
+    vi.mocked(loadVcConfig).mockResolvedValue({ status: 'ok', config: { ...CONFIG } });
+    vi.mocked(saveVcConfig).mockResolvedValue(undefined);
   });
   afterEach(() => {
     vi.clearAllMocks();
@@ -263,18 +271,18 @@ describe('handleAutoLabel', () => {
     expect(editReply).toHaveBeenCalledWith(
       'このコマンドはボイスチャンネル内のテキスト欄で実行してください',
     );
-    expect(saveConfig).not.toHaveBeenCalled();
+    expect(saveVcConfig).not.toHaveBeenCalled();
   });
 
   it('権限が無ければ拒否し保存しない', async () => {
     const { interaction } = makeInteraction(['member'], ChannelType.GuildVoice, { text: '朝活' });
     const { session } = makeSession();
     await handleAutoLabel(interaction, session, 'cfg.json', logger);
-    expect(saveConfig).not.toHaveBeenCalled();
+    expect(saveVcConfig).not.toHaveBeenCalled();
   });
 
   it('ラベルを保存しセッションへ反映する (時刻は変えない)', async () => {
-    vi.mocked(loadConfig).mockResolvedValue({
+    vi.mocked(loadVcConfig).mockResolvedValue({
       status: 'ok',
       config: { ...CONFIG, autoStart: { time: '07:30', label: '自動スタート' } },
     });
@@ -283,7 +291,7 @@ describe('handleAutoLabel', () => {
     });
     const { session } = makeSession();
     await handleAutoLabel(interaction, session, 'cfg.json', logger);
-    expect(saveConfig).toHaveBeenCalledWith(
+    expect(saveVcConfig).toHaveBeenCalledWith(
       'cfg.json',
       expect.objectContaining({ autoStart: { time: '07:30', label: '朝活' } }),
     );
@@ -294,8 +302,24 @@ describe('handleAutoLabel', () => {
 
 describe('handlePomoInit: Start Embed を EmbedManager に取り込む (設定モーダル再投稿の前提)', () => {
   beforeEach(() => {
-    vi.mocked(loadConfig).mockResolvedValue({ status: 'ok', config: { ...CONFIG } });
-    vi.mocked(saveConfig).mockResolvedValue(undefined);
+    // init は guild ファイル全体を読む。当該 VC を含む既存ファイルを返す。
+    vi.mocked(loadGuildConfigFile).mockResolvedValue({
+      status: 'ok',
+      file: {
+        guildId: 'guild-1',
+        adminRoleName: 'pomo-admin',
+        adminRoleNames: [],
+        vcs: [
+          {
+            voiceChannelId: 'vc-1',
+            default: CONFIG.default,
+            volumes: CONFIG.volumes,
+            autoStart: CONFIG.autoStart,
+          },
+        ],
+      },
+    });
+    vi.mocked(saveVcConfig).mockResolvedValue(undefined);
   });
   afterEach(() => {
     vi.clearAllMocks();

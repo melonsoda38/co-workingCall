@@ -1,6 +1,6 @@
 import { ButtonInteraction } from 'discord.js';
 import type { Logger } from 'pino';
-import { loadConfig } from '../config/index.js';
+import { loadVcConfig } from '../config/index.js';
 import type { VoiceSession } from '../voice/session-registry.js';
 import { replyEphemeral } from './interaction-helpers.js';
 
@@ -21,7 +21,7 @@ export function isExecutorInTargetVc(
 export async function handleStartButton(
   interaction: ButtonInteraction,
   session: VoiceSession | undefined,
-  configPath: string,
+  configDir: string,
   logger: Logger,
 ): Promise<void> {
   // 早期 return 系は replyEphemeral (reply + 自動削除スケジュール込み) を使う。
@@ -70,8 +70,12 @@ export async function handleStartButton(
       return;
     }
 
-    // config.json の最新値を反映 (設定モーダルの変更を再起動なしで反映)。
-    const loaded = await loadConfig(configPath);
+    // 当該 VC の config 最新値を反映 (設定モーダルの変更を再起動なしで反映)。
+    const loaded = await loadVcConfig(
+      configDir,
+      session.config.guildId,
+      session.config.voiceChannelId,
+    );
     const config = loaded.status === 'ok' ? loaded.config : session.config;
     session.embedManager.applyConfig(config);
     // 音量設定 (音量モーダルの変更) もこのセッションから反映する。

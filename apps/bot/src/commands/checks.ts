@@ -29,7 +29,11 @@ export function buttonRoleRequiredMessage(allowedRoleNames: readonly string[]): 
   return `この操作には ${allowedRoleNames.join(' / ')} のいずれかのロールが必要です`;
 }
 
-/** bot に必要な VC 権限 (CLAUDE.me セキュリティ節)。 */
+/**
+ * bot に必要な VC 権限 (CLAUDE.me セキュリティ節 / docs/deployment.md の 8 権限と一致)。
+ * AttachFiles はタイマー Embed の円形画像 PNG 添付に必須。欠けると ▶開始後のタイマー Embed が
+ * 黙って投稿失敗する (Missing Permissions 50013) ため、init のプリフライトで必ず検知する。
+ */
 export const REQUIRED_BOT_PERMISSIONS: readonly bigint[] = [
   PermissionFlagsBits.ViewChannel,
   PermissionFlagsBits.SendMessages,
@@ -38,6 +42,7 @@ export const REQUIRED_BOT_PERMISSIONS: readonly bigint[] = [
   PermissionFlagsBits.Speak,
   PermissionFlagsBits.MoveMembers,
   PermissionFlagsBits.EmbedLinks,
+  PermissionFlagsBits.AttachFiles,
 ];
 
 /** 与えられた権限に対し、必要権限のうち欠けているフラグ名一覧を返す。 */

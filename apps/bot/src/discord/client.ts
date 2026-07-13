@@ -16,7 +16,7 @@ import {
   handleVolumeModalSubmit,
   registerCommands,
 } from '../commands/index.js';
-import { loadConfig } from '../config/index.js';
+import { loadAllGuildConfigs, migrateLegacyConfig, resolveConfigDir } from '../config/index.js';
 import {
   CONTINUE_BUTTON_ID,
   SETTINGS_BUTTON_ID,
@@ -35,6 +35,11 @@ import {
  * intents は Guilds (interaction/channel 種別)、GuildMessages (messageCreate 検知)、
  * GuildVoiceStates (voiceStateUpdate と VC メンバー把握)。
  * 人間メッセージは存在検知のみで内容は読まないため MessageContent は不要。
+ *
+ * allowedMentions: { parse: [] } で全 bot 投稿のメンション解釈を無効化する (セキュリティ)。
+ * bot は本来メンションを行わないが、入室挨拶はユーザー制御の表示名 (ニックネーム) を本文に
+ * 埋め込むため、これを付けないと `@everyone` や `<@&roleId>` を含むニックネームで意図しない
+ * ping を誘発できてしまう (メンション注入)。Client 既定で一括無効化して根本から防ぐ。
  */
 export function createClient(): Client {
   return new Client({
@@ -43,22 +48,32 @@ export function createClient(): Client {
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.GuildVoiceStates,
     ],
+    allowedMentions: { parse: [] },
   });
 }
 
-/** READY 後、config 有効なら VC 自動入退室機能を結線する (US-16)。 */
-async function setupVoiceOnReady(
+/**
+ * READY 後、全 guild/VC の config をロードして VC 自動入退室機能を結線する (US-16)。
+ * 旧単一 config.json は per-guild ファイルへ自動移行してから読み込む。
+ * 各 (guild, VC) ごとにセッションを構築し、registry へ voiceChannelId で登録する。
+ */
+async function setupAllVoiceFeatures(
   client: Client<true>,
-  configPath: string,
+  legacyConfigPath: string,
+  configDir: string,
   logger: Logger,
   sessions: VoiceSessionRegistry,
 ): Promise<void> {
-  const result = await loadConfig(configPath);
-  if (result.status !== 'ok') {
-    logger.info('config 未確定のため VC 機能は待機 (/pomo init 後の再起動で有効化)');
+  await migrateLegacyConfig(legacyConfigPath, configDir, logger);
+  const all = await loadAllGuildConfigs(configDir, logger);
+  if (all.length === 0) {
+    logger.info('有効な config が無いため VC 機能は待機 (/pomo init 後の再起動で有効化)');
     return;
   }
-  await setupVoiceFeature(client, result.config, logger, sessions, configPath);
+  for (const { config } of all) {
+    await setupVoiceFeature(client, config, logger, sessions, configDir);
+  }
+  logger.info({ sessions: all.length }, '全 guild/VC の VC 機能を有効化しました');
 }
 
 /**
@@ -68,16 +83,20 @@ async function setupVoiceOnReady(
 export async function startBot(token: string, logger: Logger, configPath: string): Promise<Client> {
   const client = createClient();
   const sessions = createVoiceSessionRegistry();
+  // config は per-guild ファイル (<configDir>/<guildId>.json)。configPath は旧単一 config.json の
+  // パス (移行元) で、そこから configDir を導出する。
+  const configDir = resolveConfigDir(configPath);
 
   client.once(Events.ClientReady, (ready) => {
     logger.info({ tag: ready.user.tag, id: ready.user.id }, 'Discord bot READY');
     void registerCommands(ready, token, logger);
-    void setupVoiceOnReady(ready, configPath, logger, sessions);
+    void setupAllVoiceFeatures(ready, configPath, configDir, logger, sessions);
   });
 
   client.on(Events.InteractionCreate, (interaction) => {
-    // guild スコープのセッションは一度だけ解決する (button/modal/command 共通)。
-    const session = interaction.guildId ? sessions.get(interaction.guildId) : undefined;
+    // セッションは VC 単位 (registry キー=voiceChannelId)。/pomo 系・ボタン・モーダルは
+    // いずれも VC のテキストチャットで発生するため channelId で一度だけ解決する。
+    const session = interaction.channelId ? sessions.get(interaction.channelId) : undefined;
 
     if (interaction.isChatInputCommand()) {
       if (interaction.commandName !== 'pomo') {
@@ -86,15 +105,15 @@ export async function startBot(token: string, logger: Logger, configPath: string
       const group = interaction.options.getSubcommandGroup(false);
       const sub = interaction.options.getSubcommand(false);
       if (group === 'admin-role') {
-        void handleAdminRole(interaction, session, configPath, logger);
+        void handleAdminRole(interaction, session, configDir, logger);
       } else if (sub === 'init') {
-        void handlePomoInit(interaction, session, configPath, logger);
+        void handlePomoInit(interaction, session, configDir, logger);
       } else if (sub === 'stop') {
         void handlePomoStop(interaction, session, logger);
       } else if (sub === 'auto-label') {
-        void handleAutoLabel(interaction, session, configPath, logger);
+        void handleAutoLabel(interaction, session, configDir, logger);
       } else if (sub === 'help') {
-        void handlePomoHelp(interaction, session, configPath, logger);
+        void handlePomoHelp(interaction, session, configDir, logger);
       }
       return;
     }
@@ -102,16 +121,16 @@ export async function startBot(token: string, logger: Logger, configPath: string
     if (interaction.isButton()) {
       switch (interaction.customId) {
         case START_BUTTON_ID:
-          void handleStartButton(interaction, session, configPath, logger);
+          void handleStartButton(interaction, session, configDir, logger);
           break;
         case CONTINUE_BUTTON_ID:
           void handleContinueButton(interaction, session, logger);
           break;
         case SETTINGS_BUTTON_ID:
-          void handleSettingsButton(interaction, session, configPath, logger);
+          void handleSettingsButton(interaction, session, configDir, logger);
           break;
         case VOLUME_BUTTON_ID:
-          void handleVolumeButton(interaction, session, configPath, logger);
+          void handleVolumeButton(interaction, session, configDir, logger);
           break;
       }
       return;
@@ -120,10 +139,10 @@ export async function startBot(token: string, logger: Logger, configPath: string
     if (interaction.isModalSubmit()) {
       switch (interaction.customId) {
         case SETTINGS_MODAL_ID:
-          void handleSettingsModalSubmit(interaction, session, configPath, logger);
+          void handleSettingsModalSubmit(interaction, session, configDir, logger);
           break;
         case VOLUME_MODAL_ID:
-          void handleVolumeModalSubmit(interaction, session, configPath, logger);
+          void handleVolumeModalSubmit(interaction, session, configDir, logger);
           break;
       }
       return;
@@ -138,7 +157,8 @@ export async function startBot(token: string, logger: Logger, configPath: string
     if (!message.guildId) {
       return;
     }
-    const session = sessions.get(message.guildId);
+    // セッションは VC 単位。VC のテキストチャット (channelId=voiceChannelId) で解決する。
+    const session = sessions.get(message.channelId);
     if (!session) {
       return;
     }

@@ -56,3 +56,66 @@ export const BotConfigSchema = z.object({
   autoStart: AutoStartConfigSchema,
 });
 export type BotConfig = z.infer<typeof BotConfigSchema>;
+
+/**
+ * guild ファイル内の VC 1件分の設定 (guild レベル項目 adminRole* を除いた per-VC 設定)。
+ * BotConfig からギルド共通項目を差し引いた形。permanenceする際は guild ファイルの vcs 配列に並ぶ。
+ */
+export const VcConfigSchema = z.object({
+  voiceChannelId: z.string().min(1),
+  default: TimerConfigSchema,
+  volumes: VolumeConfigSchema,
+  autoStart: AutoStartConfigSchema,
+});
+export type VcConfig = z.infer<typeof VcConfigSchema>;
+
+/**
+ * guild ファイル1個 = 1 ギルド分の設定。config/<guildId>.json に永続化する。
+ * adminRoleName / adminRoleNames は guild 全体で共有する実行権限ロール。
+ * vcs は当該ギルドで運用する VC ごとの設定 (現状は各ギルド1件、将来 same-guild 複数VCで N件)。
+ * bot は 1 ギルドにつき同時1VC接続までだが、ファイルは複数VC設定を同居できる構造にしておく。
+ */
+export const GuildConfigFileSchema = z.object({
+  guildId: z.string().min(1),
+  adminRoleName: z.string().min(1).default('pomo-admin'),
+  adminRoleNames: z.array(z.string().min(1)).default([]),
+  vcs: z.array(VcConfigSchema).min(1),
+});
+export type GuildConfigFile = z.infer<typeof GuildConfigFileSchema>;
+
+/**
+ * guild ファイルを VC 単位のフラットな BotConfig 配列へ展開する。
+ * 下流 (EmbedManager 等) は従来通り BotConfig を消費するため、ファイル層との境界で合成する。
+ */
+export function toBotConfigs(file: GuildConfigFile): BotConfig[] {
+  return file.vcs.map((vc) => ({
+    default: vc.default,
+    guildId: file.guildId,
+    voiceChannelId: vc.voiceChannelId,
+    adminRoleName: file.adminRoleName,
+    adminRoleNames: file.adminRoleNames,
+    volumes: vc.volumes,
+    autoStart: vc.autoStart,
+  }));
+}
+
+/**
+ * フラットな BotConfig を guild ファイルへ反映する (same-guild 複数VC 同居アルゴリズムの中核)。
+ * guild レベル項目 (adminRole*) を config の値で更新し、config.voiceChannelId をキーに
+ * vcs を差し替え/追加する。base 未指定 (初回) は当該 VC のみを持つ新規ファイルを生成する。
+ */
+export function upsertVc(base: GuildConfigFile | null, config: BotConfig): GuildConfigFile {
+  const vc: VcConfig = {
+    voiceChannelId: config.voiceChannelId,
+    default: config.default,
+    volumes: config.volumes,
+    autoStart: config.autoStart,
+  };
+  const others = (base?.vcs ?? []).filter((v) => v.voiceChannelId !== config.voiceChannelId);
+  return {
+    guildId: config.guildId,
+    adminRoleName: config.adminRoleName,
+    adminRoleNames: config.adminRoleNames,
+    vcs: [...others, vc],
+  };
+}

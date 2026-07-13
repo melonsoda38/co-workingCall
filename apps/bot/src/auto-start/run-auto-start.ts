@@ -1,5 +1,5 @@
 import type { Logger } from 'pino';
-import { loadConfig } from '../config/index.js';
+import { loadVcConfig } from '../config/index.js';
 import type { VoiceSession } from '../voice/session-registry.js';
 
 /**
@@ -12,11 +12,15 @@ import type { VoiceSession } from '../voice/session-registry.js';
  */
 export async function runAutoStart(
   session: VoiceSession,
-  configPath: string,
+  configDir: string,
   logger: Logger,
 ): Promise<void> {
   try {
-    const loaded = await loadConfig(configPath);
+    const loaded = await loadVcConfig(
+      configDir,
+      session.config.guildId,
+      session.config.voiceChannelId,
+    );
     if (loaded.status !== 'ok') {
       logger.warn({ status: loaded.status }, '自動スタート: config が無効なため中止します');
       return;

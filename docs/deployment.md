@@ -117,10 +117,16 @@ https://discord.com/api/oauth2/authorize?client_id=<APPLICATION_ID>&permissions=
 - 招待後 (またはスコープ追加後) は bot を再起動して `registerCommands` を走らせる。
   スラッシュコマンドは起動時に参加中の全ギルドへ登録されるため、
   **プロセス稼働中に新サーバーへ招待しただけではコマンドが登録されない**。
-- 別サーバーへ移設した場合は `config.json` が旧サーバーの `guildId/voiceChannelId` を
-  指したままになる。新サーバーで `/pomo init` を実行して上書きし、bot を再起動すること。
+- **複数サーバーで同時運用できる**。設定は guild ごとに別ファイル
+  (`<configDir>/<guildId>.json`) で保持し、起動時に全 guild のセッションを構築する。
+  新サーバーを追加するときは、そのサーバーで `/pomo init` を実行し、bot を再起動すれば
+  既存サーバーの設定はそのまま各サーバーが独立に稼働する (旧サーバー設定を上書きしない)。
+- Discord の仕様上、1 つの bot アカウントは **1 サーバーにつき同時 1 VC 接続まで**。
+  同一サーバー内で複数 VC を同時稼働させることはできない (別 VC で `/pomo init` すると
+  警告ログを出す)。異なるサーバーであれば各 1 VC ずつ同時稼働できる。
 - Privileged Gateway Intents は不要 (`Guilds`/`GuildMessages`/`GuildVoiceStates` は
-  すべて非特権。Message Content Intent も使わない)。
+  すべて非特権。Message Content Intent も使わない)。招待に必要な Scope/Permission は
+  上記のまま (機能追加による追加要件なし)。
 
 ## プロジェクトのデプロイ
 
@@ -145,6 +151,14 @@ DISCORD_TOKEN=実際のトークン
 CONFIG_PATH=./config.json
 LOG_LEVEL=info
 ```
+
+- 設定は guild ごとに `<CONFIG_PATH の拡張子除去名>.guilds/<guildId>.json` に保存される
+  (例: `CONFIG_PATH=./config.json` なら `./config.guilds/<guildId>.json`、テストの
+  `config.staging.json` なら `./config.staging.guilds/<guildId>.json`)。本番とテストの
+  guild 設定が別ディレクトリに分かれる。
+  1 つの guild ファイルは複数 VC 設定を同居できる構造だが、現状は各 guild 1 VC で運用する。
+- 旧バージョンの単一 `config.json` は、起動時に自動で `config.guilds/<guildId>.json` へ
+  移行され、元ファイルは `config.json.migrated` に退避される (手動作業は不要)。
 
 #### 本番/テストの env 自動切り替え (NODE_ENV)
 
@@ -204,7 +218,9 @@ nvm の終了コードに依存しない)、Node が 22 未満なら明確なエ
 ### 6. /pomo init で初期化
 Discord 上で対象 VC を開き、**VC の内蔵テキスト欄**で `/pomo init` を実行
 (Discord の「サーバー管理」権限 + `pomo-admin` ロールが必要)。
-config.json が自動生成される。
+そのサーバーの設定ファイル `guilds/<guildId>.json` が自動生成される。
+複数サーバーで使う場合は、各サーバーで `/pomo init` を実行してから bot を再起動すると、
+全サーバーが独立に稼働する。
 
 ## systemd ユーザーサービス化
 

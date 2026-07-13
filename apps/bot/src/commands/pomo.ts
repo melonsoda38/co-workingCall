@@ -13,8 +13,9 @@ import {
   DEFAULT_AUTO_START,
   DEFAULT_TIMER_CONFIG,
   DEFAULT_VOLUME_CONFIG,
-  loadConfig,
-  saveConfig,
+  loadGuildConfigFile,
+  loadVcConfig,
+  saveVcConfig,
 } from '../config/index.js';
 import { purgeOwnEmbeds } from '../discord/purge-embeds.js';
 import { buildStartEmbedMessage } from '../embed/index.js';
@@ -89,7 +90,7 @@ export const pomoCommand = new SlashCommandBuilder()
 export async function handlePomoInit(
   interaction: ChatInputCommandInteraction,
   session: VoiceSession | undefined,
-  configPath: string,
+  configDir: string,
   logger: Logger,
 ): Promise<void> {
   try {
@@ -106,10 +107,12 @@ export async function handlePomoInit(
       return;
     }
 
-    const existing = await loadConfig(configPath);
-    const existingConfig = existing.status === 'ok' ? existing.config : null;
-    const adminRoleName = existingConfig?.adminRoleName ?? DEFAULT_ADMIN_ROLE_NAME;
-    const adminRoleNames = existingConfig?.adminRoleNames ?? [];
+    // guild ファイル全体を読む。許可ロールは guild レベル (VC 横断で共有) のため
+    // 当該 VC が未登録でも既存の guild 設定から引き継ぐ。
+    const guildFile = await loadGuildConfigFile(configDir, guild.id);
+    const existingFile = guildFile.status === 'ok' ? guildFile.file : null;
+    const adminRoleName = existingFile?.adminRoleName ?? DEFAULT_ADMIN_ROLE_NAME;
+    const adminRoleNames = existingFile?.adminRoleNames ?? [];
     const allowedRoles = buildAllowedRoleNames(adminRoleName, adminRoleNames);
 
     const member = await guild.members.fetch(interaction.user.id);
@@ -130,25 +133,31 @@ export async function handlePomoInit(
       return;
     }
 
-    if (existingConfig && existingConfig.voiceChannelId !== channel.id) {
-      logger.info(
-        { oldVoiceChannelId: existingConfig.voiceChannelId, newVoiceChannelId: channel.id },
-        'VC切替: 旧VCのスタートEmbedは新VC側のpurgeOwnEmbeds対象外。必要なら旧VCで手動削除を',
+    // 当該 VC の既存設定 (タイマー/音量/自動スタート) は維持し、無ければ既定で新規作成する。
+    const existingVc = existingFile?.vcs.find((vc) => vc.voiceChannelId === channel.id) ?? null;
+    if (existingFile && !existingVc && existingFile.vcs.length > 0) {
+      logger.warn(
+        {
+          guildId: guild.id,
+          existingVcs: existingFile.vcs.map((vc) => vc.voiceChannelId),
+          newVoiceChannelId: channel.id,
+        },
+        '同一guildで別VCをセットアップしました。botは1guildにつき同時1VCまでのため複数VC同時稼働は未対応です',
       );
     }
 
     const config: BotConfig = {
-      default: existingConfig?.default ?? DEFAULT_TIMER_CONFIG,
+      default: existingVc?.default ?? DEFAULT_TIMER_CONFIG,
       guildId: guild.id,
       voiceChannelId: channel.id,
       adminRoleName,
       adminRoleNames,
       // 既存の音量設定は維持。新規は全音 0dB (原音)。
-      volumes: existingConfig?.volumes ?? DEFAULT_VOLUME_CONFIG,
+      volumes: existingVc?.volumes ?? DEFAULT_VOLUME_CONFIG,
       // 既存の自動スタート設定は維持。新規は無効 (time=null)。
-      autoStart: existingConfig?.autoStart ?? DEFAULT_AUTO_START,
+      autoStart: existingVc?.autoStart ?? DEFAULT_AUTO_START,
     };
-    await saveConfig(configPath, config);
+    await saveVcConfig(configDir, config);
     // 新規スタート Embed 投稿の直前に、対象 VC テキスト欄から bot 自身の過去 Embed を掃除
     // (init 連打や前回起動の追跡漏れも含めてテキスト欄を 1 Embed に保つ)。
     await purgeOwnEmbeds(channel, interaction.client.user.id, logger);
@@ -197,7 +206,7 @@ export async function handlePomoInit(
 export async function handlePomoHelp(
   interaction: ChatInputCommandInteraction,
   _session: VoiceSession | undefined,
-  _configPath: string,
+  _configDir: string,
   logger: Logger,
 ): Promise<void> {
   try {
@@ -281,7 +290,7 @@ export async function handlePomoStop(
 export async function handleAdminRole(
   interaction: ChatInputCommandInteraction,
   session: VoiceSession | undefined,
-  configPath: string,
+  configDir: string,
   logger: Logger,
 ): Promise<void> {
   try {
@@ -300,7 +309,11 @@ export async function handleAdminRole(
     }
 
     // add / remove: 最新 config を基に adminRoleNames を更新し、保存 + セッションへ即反映。
-    const loaded = await loadConfig(configPath);
+    const loaded = await loadVcConfig(
+      configDir,
+      activeSession.config.guildId,
+      activeSession.config.voiceChannelId,
+    );
     const base = loaded.status === 'ok' ? loaded.config : activeSession.config;
     const role = interaction.options.getRole('role', true);
     // 許可ロール集合 (基準ロール + 追加ロール、重複除去)。基準ロールは常に先頭。
@@ -330,7 +343,7 @@ export async function handleAdminRole(
       const [newBase = base.adminRoleName, ...rest] = allowed.filter((name) => name !== role.name);
       updated = { ...base, adminRoleName: newBase, adminRoleNames: rest };
     }
-    await saveConfig(configPath, updated);
+    await saveVcConfig(configDir, updated);
     activeSession.config = updated; // 稼働中セッションへ即反映 (再起動不要)
 
     const verb = action === 'add' ? '追加' : '削除';
@@ -354,7 +367,7 @@ export async function handleAdminRole(
 export async function handleAutoLabel(
   interaction: ChatInputCommandInteraction,
   session: VoiceSession | undefined,
-  configPath: string,
+  configDir: string,
   logger: Logger,
 ): Promise<void> {
   try {
@@ -372,10 +385,14 @@ export async function handleAutoLabel(
       return;
     }
 
-    const loaded = await loadConfig(configPath);
+    const loaded = await loadVcConfig(
+      configDir,
+      activeSession.config.guildId,
+      activeSession.config.voiceChannelId,
+    );
     const base = loaded.status === 'ok' ? loaded.config : activeSession.config;
     const updated: BotConfig = { ...base, autoStart: { ...base.autoStart, label: text } };
-    await saveConfig(configPath, updated);
+    await saveVcConfig(configDir, updated);
     activeSession.config = updated; // 稼働中セッションへ即反映 (再起動不要)
 
     await interaction.editReply(`自動スタートのお知らせ文字を「${text}」に設定しました`);

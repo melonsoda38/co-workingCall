@@ -20,7 +20,11 @@ export interface VoiceSession {
   autoStartScheduler: AutoStartScheduler;
 }
 
-/** guildId をキーにしたセッションの登録簿。 */
+/**
+ * voiceChannelId をキーにしたセッションの登録簿。
+ * VC 単位で登録するため、複数サーバー各1VC でも将来の同一guild複数VC でも衝突しない。
+ * interaction / message は VC のテキストチャットで発生するため channelId で解決できる。
+ */
 export type VoiceSessionRegistry = Map<string, VoiceSession>;
 
 /** 空のセッションレジストリを生成する。 */

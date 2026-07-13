@@ -2,9 +2,8 @@ import type { BaseMessageOptions, MessageCreateOptions } from 'discord.js';
 import type { Logger } from 'pino';
 import type { BotConfig, TimerPhase, TimerSnapshot } from '@co-working-call/shared';
 import { buildStartEmbedMessage } from './start-embed.js';
-import { buildTimerEmbedContent, buildTimerEmbedMessage } from './timer-embed.js';
 import { RepostDebouncer } from './repost-debouncer.js';
-import { TimerEmbedUpdater } from './timer-embed-updater.js';
+import { TimerEmbedController } from './timer-embed-controller.js';
 import { buildFarewellMessage, FAREWELL_CONTENT } from './farewell-message.js';
 import { buildAutoStartResetMessage } from './auto-start-message.js';
 import { buildTimeoutMessage, TIMEOUT_CONTENT } from './timeout-message.js';
@@ -152,8 +151,8 @@ export class EmbedManager {
    */
   #currentPhase: TimerPhase = 'idle';
   #startEmbedId: string | null = null;
-  #timerEmbedId: string | null = null;
-  #updater: TimerEmbedUpdater | null = null;
+  /** タイマー Embed のライフサイクル (投稿/貼り直し/5秒更新/countdown edit/削除) を委譲するコントローラ。 */
+  readonly #timerEmbed: TimerEmbedController;
   /** 終了演出の二重発火防止 (ended イベントと空 VC 退出など複数経路から起動し得る)。 */
   #isEnding = false;
   /** 「続行」継続セッションの状態と 23時間キャップ (US-続行)。 */
@@ -169,13 +168,19 @@ export class EmbedManager {
     this.#soundNotifier = deps.soundNotifier;
     this.#endingActions = deps.endingActions;
     this.#endingDelay = deps.endingDelay ?? defaultEndingDelay;
+    this.#timerEmbed = new TimerEmbedController({
+      channel: deps.channel,
+      timer: deps.timer,
+      config: deps.config,
+      logger: deps.logger,
+    });
     // 23時間キャップ発火時は継続/通常を問わず 23時間メッセージ付きで実終了する。
     this.#continueState = new ContinueSessionState({
       capMs: CONTINUE_MAX_SESSION_MS,
       onCap: () => void this.#force23hEnd(),
     });
     this.#debouncer = new RepostDebouncer({
-      callback: () => this.#repostTimerEmbed(),
+      callback: () => this.#timerEmbed.repost(),
       onError: (err) => {
         this.#logger.error({ err }, 'Embed 再投稿に失敗しました');
       },
@@ -196,7 +201,7 @@ export class EmbedManager {
     return this.#startEmbedId;
   }
   get timerEmbedId(): string | null {
-    return this.#timerEmbedId;
+    return this.#timerEmbed.id;
   }
   /** 終了演出フロー進行中か (▶開始の二重起動防止に commands 側から参照)。 */
   get isEnding(): boolean {
@@ -256,10 +261,8 @@ export class EmbedManager {
     this.#followup.cancel();
     await this.#channel.purgeOwnTexts([FAREWELL_CONTENT, TIMEOUT_CONTENT]);
     await this.#deleteStartEmbed();
-    const snapshot = this.#timer.getSnapshot();
-    const posted = await this.#postFresh(buildTimerEmbedMessage(snapshot, this.#config));
-    this.#timerEmbedId = posted.id;
-    this.#startUpdater();
+    await this.#timerEmbed.post();
+    this.#timerEmbed.startUpdater();
   }
 
   /** 人間メッセージ検知: work/break/finalBreak のみデバウンス開始。 */
@@ -300,11 +303,8 @@ export class EmbedManager {
     this.#logger.info('countdown 突入: 終了予告音を再生し 5秒更新を停止');
     this.#soundNotifier?.playCountdownWarning();
     this.#debouncer.cancel();
-    this.#updater?.stop();
-    if (this.#timerEmbedId !== null) {
-      const snapshot = this.#timer.getSnapshot();
-      await this.#channel.edit(this.#timerEmbedId, buildTimerEmbedContent(snapshot, this.#config));
-    }
+    this.#timerEmbed.stopUpdater();
+    await this.#timerEmbed.editForCountdown();
   }
 
   /**
@@ -333,8 +333,7 @@ export class EmbedManager {
       // 「続行」が押されていて未移行なら、終了演出後に継続ループへ移行する。
       const continuing = reason === 'normal' && this.#continueState.shouldContinue();
       this.#logger.info({ reason, continuing }, '終了演出フロー開始 (ending-spec §第二段階)');
-      this.#updater?.stop();
-      this.#updater = null;
+      this.#timerEmbed.discardUpdater();
       this.#debouncer.cancel();
       // 1. 終了音 (4 秒、非同期で開始)。続行あり/なし共通。
       this.#logger.info('finish.mp3 再生開始');
@@ -342,7 +341,7 @@ export class EmbedManager {
       // 2. 通常終了のみ: タイマー Embed 削除 → 終了テキスト投稿 → フォローアップ予約。
       //    継続時は Embed を消さない (継続の phaseChange(work) が中間切替で貼り替えるため)。
       if (!continuing) {
-        await this.#deleteTimerEmbed();
+        await this.#timerEmbed.deleteEmbed();
         // 終了テキスト投稿 (23時間キャップ起因ならその旨、それ以外はお疲れさま)。Embed なしの
         // 単発テキストで、投稿から 15 秒後に「削除 → 新スタート Embed 投稿」を予約する。
         const endingMessage =
@@ -424,6 +423,7 @@ export class EmbedManager {
    */
   async repostStartEmbed(config: BotConfig): Promise<void> {
     this.#config = config;
+    this.#timerEmbed.applyConfig(config);
     if (this.#startEmbedId === null || this.#isEnding) {
       return;
     }
@@ -447,6 +447,7 @@ export class EmbedManager {
    */
   applyConfig(config: BotConfig): void {
     this.#config = config;
+    this.#timerEmbed.applyConfig(config);
   }
 
   /**
@@ -467,7 +468,7 @@ export class EmbedManager {
     const from = this.#currentPhase;
     this.#currentPhase = to;
 
-    if (this.#timerEmbedId === null) {
+    if (this.#timerEmbed.id === null) {
       // 初回 (idle→work): セッション開始の合図として break_end.mp3 を鳴らし、
       // スタート削除 → タイマー投稿。onTimerStart は await を挟むため、音は
       // await の前に fire-and-forget で鳴らして即時性を確保する。
@@ -484,64 +485,24 @@ export class EmbedManager {
       playPhaseTransitionSound(this.#soundNotifier, phaseTransitionSound(from, to));
     }
     this.#debouncer.cancel();
-    await this.#repostTimerEmbed();
-    this.#startUpdater();
-  }
-
-  async #repostTimerEmbed(): Promise<void> {
-    // 表示フェーズ (work/break/finalBreak) 以外では貼り直さない。
-    // デバウンス flush は cancel() で止められない (in-flight)。countdown/ended/idle へ
-    // 遷移した後にデバウンス再投稿が走ると、ended の「-」表示 Embed を孤児として
-    // post したり、purgeOwnEmbeds がスタート Embed を巻き込む等の不整合を生む。
-    // 実フェーズを確認し、表示フェーズ外なら no-op にして遷移ハンドラ側の Embed を尊重する。
-    const { phase } = this.#timer.getSnapshot();
-    if (phase !== 'work' && phase !== 'break' && phase !== 'finalBreak') {
-      return;
-    }
-    await this.#deleteTimerEmbed();
-    const snapshot = this.#timer.getSnapshot();
-    const posted = await this.#postFresh(buildTimerEmbedMessage(snapshot, this.#config));
-    this.#timerEmbedId = posted.id;
+    await this.#timerEmbed.repost();
+    this.#timerEmbed.startUpdater();
   }
 
   /**
-   * 新規 Embed 投稿の共通入口。直前に purgeOwnEmbeds で過去 Embed を掃除してから post。
+   * 新規スタート Embed 投稿の共通入口。直前に purgeOwnEmbeds で過去 Embed を掃除してから post。
    * これで「テキスト欄に bot 自身の Embed は常に 1 つ」を保証する。
-   * id 追跡 (#startEmbedId / #timerEmbedId) と purge による掃除の二重防御。
+   * タイマー Embed 側の同等処理は TimerEmbedController が持ち、同じ purgeOwnEmbeds を共有する。
    */
   async #postFresh(options: MessageCreateOptions): Promise<PostedMessage> {
     await this.#channel.purgeOwnEmbeds();
     return this.#channel.post(options);
   }
 
-  #startUpdater(): void {
-    this.#updater?.stop();
-    const message = {
-      edit: (options: BaseMessageOptions): Promise<unknown> => {
-        if (this.#timerEmbedId === null) {
-          return Promise.resolve();
-        }
-        return this.#channel.edit(this.#timerEmbedId, options);
-      },
-    };
-    this.#updater = new TimerEmbedUpdater(message, this.#timer, this.#config, (err) => {
-      this.#logger.error({ err }, 'タイマー Embed 更新に失敗しました');
-    });
-    this.#updater.start();
-  }
-
   async #deleteStartEmbed(): Promise<void> {
     if (this.#startEmbedId !== null) {
       const id = this.#startEmbedId;
       this.#startEmbedId = null;
-      await this.#tryDelete(id);
-    }
-  }
-
-  async #deleteTimerEmbed(): Promise<void> {
-    if (this.#timerEmbedId !== null) {
-      const id = this.#timerEmbedId;
-      this.#timerEmbedId = null;
       await this.#tryDelete(id);
     }
   }
@@ -568,13 +529,12 @@ export class EmbedManager {
    * Embed 削除順序も異なるため本ヘルパーは使わない (意図的)。
    */
   async #teardownToIdle(): Promise<void> {
-    this.#updater?.stop();
-    this.#updater = null;
+    this.#timerEmbed.discardUpdater();
     this.#debouncer.cancel();
     this.#followup.cancel();
     this.#continueState.reset();
     this.#currentPhase = 'idle';
-    await this.#deleteTimerEmbed();
+    await this.#timerEmbed.deleteEmbed();
   }
 
   /**

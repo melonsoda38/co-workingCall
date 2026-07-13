@@ -1,10 +1,11 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MessageFlags, ModalBuilder } from 'discord.js';
 import type { Logger } from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BotConfig } from '@co-working-call/shared';
+import { loadVcConfig, saveVcConfig } from '../config/index.js';
 import type { VoiceSession } from '../voice/session-registry.js';
 import {
   SETTINGS_MODAL_ID,
@@ -18,6 +19,15 @@ import {
   FINAL_MIN_ID,
   AUTO_START_TIME_ID,
 } from './settings-modal.js';
+
+/** per-guild ファイルから当該 VC の保存済み config を読み出す (テスト検証用)。 */
+async function readSavedConfig(dir: string): Promise<BotConfig> {
+  const r = await loadVcConfig(dir, '1001', 'vc');
+  if (r.status !== 'ok') {
+    throw new Error(`config not ok: ${r.status}`);
+  }
+  return r.config;
+}
 
 describe('parseSettingsModalInput', () => {
   it('有効な分入力を秒に換算して返す', () => {
@@ -174,10 +184,9 @@ describe('handleSettingsModalSubmit (Start Embed 投稿し直し結線)', () => 
   } as unknown as Logger;
 
   let dir: string;
-  let configPath: string;
   const initialConfig: BotConfig = {
     default: { workSec: 1500, breakSec: 300, sets: 4, finalBreakSec: 900 },
-    guildId: 'g',
+    guildId: '1001',
     voiceChannelId: 'vc',
     adminRoleName: 'pomo-admin',
     adminRoleNames: [],
@@ -187,8 +196,7 @@ describe('handleSettingsModalSubmit (Start Embed 投稿し直し結線)', () => 
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'cowork-settings-'));
-    configPath = join(dir, 'config.json');
-    await writeFile(configPath, JSON.stringify(initialConfig), 'utf-8');
+    await saveVcConfig(dir, initialConfig);
     vi.clearAllMocks();
   });
   afterEach(async () => {
@@ -200,15 +208,21 @@ describe('handleSettingsModalSubmit (Start Embed 投稿し直し結線)', () => 
     flags: number;
   }
 
-  function makeInteraction(fields: {
-    workMin: string;
-    breakMin: string;
-    sets: string;
-    finalMin: string;
-    autoStartTime?: string;
-  }) {
+  function makeInteraction(
+    fields: {
+      workMin: string;
+      breakMin: string;
+      sets: string;
+      finalMin: string;
+      autoStartTime?: string;
+    },
+    memberRoles: string[] = ['pomo-admin'],
+  ) {
     const reply = vi.fn<(options: ReplyOptions) => Promise<void>>(() => Promise.resolve());
     const deleteReply = vi.fn<() => Promise<void>>(() => Promise.resolve());
+    const fetch = vi.fn(() =>
+      Promise.resolve({ roles: { cache: memberRoles.map((name) => ({ name })) } }),
+    );
     const fieldsMap: Record<string, string> = {
       [WORK_MIN_ID]: fields.workMin,
       [BREAK_MIN_ID]: fields.breakMin,
@@ -224,6 +238,10 @@ describe('handleSettingsModalSubmit (Start Embed 投稿し直し結線)', () => 
       deleteReply,
       deferred: false,
       replied: false,
+      guildId: '1001',
+      channelId: 'vc',
+      user: { id: 'user-1' },
+      guild: { id: '1001', members: { fetch } },
     };
   }
 
@@ -251,7 +269,7 @@ describe('handleSettingsModalSubmit (Start Embed 投稿し直し結線)', () => 
     await handleSettingsModalSubmit(
       interaction as unknown as Parameters<typeof handleSettingsModalSubmit>[0],
       session,
-      configPath,
+      dir,
       logger,
     );
 
@@ -268,7 +286,7 @@ describe('handleSettingsModalSubmit (Start Embed 投稿し直し結線)', () => 
       finalBreakSec: 1200,
     });
     // config.json も実際に上書きされている (再投稿に渡される config と整合)。
-    const saved = JSON.parse(await readFile(configPath, 'utf-8')) as BotConfig;
+    const saved = await readSavedConfig(dir);
     expect(saved.default).toEqual(passed?.default);
   });
 
@@ -285,11 +303,11 @@ describe('handleSettingsModalSubmit (Start Embed 投稿し直し結線)', () => 
     await handleSettingsModalSubmit(
       interaction as unknown as Parameters<typeof handleSettingsModalSubmit>[0],
       session,
-      configPath,
+      dir,
       logger,
     );
 
-    const saved = JSON.parse(await readFile(configPath, 'utf-8')) as BotConfig;
+    const saved = await readSavedConfig(dir);
     expect(saved.autoStart.time).toBe('08:00');
     // 既存ラベルは保持される。
     expect(saved.autoStart.label).toBe('自動スタート');
@@ -298,11 +316,7 @@ describe('handleSettingsModalSubmit (Start Embed 投稿し直し結線)', () => 
 
   it('時刻を空欄で送信すると自動スタートを無効化 (time=null) しスケジューラも無効化する', async () => {
     // 既存 config に時刻が入っている状態から空欄送信で無効化できることを確認する。
-    await writeFile(
-      configPath,
-      JSON.stringify({ ...initialConfig, autoStart: { time: '09:00', label: '朝活' } }),
-      'utf-8',
-    );
+    await saveVcConfig(dir, { ...initialConfig, autoStart: { time: '09:00', label: '朝活' } });
     const interaction = makeInteraction({
       workMin: '25',
       breakMin: '5',
@@ -315,11 +329,11 @@ describe('handleSettingsModalSubmit (Start Embed 投稿し直し結線)', () => 
     await handleSettingsModalSubmit(
       interaction as unknown as Parameters<typeof handleSettingsModalSubmit>[0],
       session,
-      configPath,
+      dir,
       logger,
     );
 
-    const saved = JSON.parse(await readFile(configPath, 'utf-8')) as BotConfig;
+    const saved = await readSavedConfig(dir);
     expect(saved.autoStart.time).toBeNull();
     // ラベルは保持される。
     expect(saved.autoStart.label).toBe('朝活');
@@ -338,7 +352,7 @@ describe('handleSettingsModalSubmit (Start Embed 投稿し直し結線)', () => 
     await handleSettingsModalSubmit(
       interaction as unknown as Parameters<typeof handleSettingsModalSubmit>[0],
       session,
-      configPath,
+      dir,
       logger,
     );
 
@@ -347,7 +361,7 @@ describe('handleSettingsModalSubmit (Start Embed 投稿し直し結線)', () => 
     expect(replyCall?.content).toContain('作業時間は1〜999分の整数で入力してください');
     expect(repostStartEmbed).not.toHaveBeenCalled();
     // config.json は変更されない。
-    const saved = JSON.parse(await readFile(configPath, 'utf-8')) as BotConfig;
+    const saved = await readSavedConfig(dir);
     expect(saved.default).toEqual(initialConfig.default);
   });
 
@@ -362,7 +376,7 @@ describe('handleSettingsModalSubmit (Start Embed 投稿し直し結線)', () => 
     await handleSettingsModalSubmit(
       interaction as unknown as Parameters<typeof handleSettingsModalSubmit>[0],
       undefined,
-      configPath,
+      dir,
       logger,
     );
 
@@ -370,7 +384,7 @@ describe('handleSettingsModalSubmit (Start Embed 投稿し直し結線)', () => 
       content: '設定を保存しました ✅',
       flags: MessageFlags.Ephemeral,
     });
-    const saved = JSON.parse(await readFile(configPath, 'utf-8')) as BotConfig;
+    const saved = await readSavedConfig(dir);
     expect(saved.default).toEqual({ workSec: 1500, breakSec: 300, sets: 4, finalBreakSec: 900 });
   });
 
@@ -389,7 +403,7 @@ describe('handleSettingsModalSubmit (Start Embed 投稿し直し結線)', () => 
       handleSettingsModalSubmit(
         interaction as unknown as Parameters<typeof handleSettingsModalSubmit>[0],
         session,
-        configPath,
+        dir,
         logger,
       ),
     ).resolves.toBeUndefined();
@@ -402,6 +416,28 @@ describe('handleSettingsModalSubmit (Start Embed 投稿し直し結線)', () => 
     // logger.warn が呼ばれている (引数の詳細までは緩く検証)。
     expect(logger.warn).toHaveBeenCalled();
   });
+
+  it('非管理者の送信は権限再チェックで弾かれ保存しない (defense-in-depth)', async () => {
+    const interaction = makeInteraction(
+      { workMin: '30', breakMin: '7', sets: '3', finalMin: '20' },
+      ['everyone'],
+    );
+    const { session, repostStartEmbed } = makeSession();
+
+    await handleSettingsModalSubmit(
+      interaction as unknown as Parameters<typeof handleSettingsModalSubmit>[0],
+      session,
+      dir,
+      logger,
+    );
+
+    // 権限不足の応答が返り、config は変更されない (default が初期値のまま)。
+    const replyContent = interaction.reply.mock.calls[0]?.[0]?.content;
+    expect(replyContent).toContain('ロールが必要');
+    expect(repostStartEmbed).not.toHaveBeenCalled();
+    const saved = await readSavedConfig(dir);
+    expect(saved.default).toEqual(initialConfig.default);
+  });
 });
 
 describe('handleSettingsButton (Start Embed 取り込み結線)', () => {
@@ -413,10 +449,9 @@ describe('handleSettingsButton (Start Embed 取り込み結線)', () => {
   } as unknown as Logger;
 
   let dir: string;
-  let configPath: string;
   const initialConfig: BotConfig = {
     default: { workSec: 1500, breakSec: 300, sets: 4, finalBreakSec: 900 },
-    guildId: 'g',
+    guildId: '1001',
     voiceChannelId: 'vc',
     adminRoleName: 'pomo-admin',
     adminRoleNames: [],
@@ -426,8 +461,7 @@ describe('handleSettingsButton (Start Embed 取り込み結線)', () => {
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'cowork-settings-btn-'));
-    configPath = join(dir, 'config.json');
-    await writeFile(configPath, JSON.stringify(initialConfig), 'utf-8');
+    await saveVcConfig(dir, initialConfig);
     vi.clearAllMocks();
   });
   afterEach(async () => {
@@ -443,7 +477,9 @@ describe('handleSettingsButton (Start Embed 取り込み結線)', () => {
     return {
       message: { id: messageId },
       user: { id: 'user-1' },
-      guild: { id: 'g', members: { fetch } },
+      guild: { id: '1001', members: { fetch } },
+      guildId: '1001',
+      channelId: 'vc',
       showModal,
       reply,
     };
@@ -464,7 +500,7 @@ describe('handleSettingsButton (Start Embed 取り込み結線)', () => {
     await handleSettingsButton(
       interaction as unknown as Parameters<typeof handleSettingsButton>[0],
       session,
-      configPath,
+      dir,
       logger,
     );
 
@@ -479,7 +515,7 @@ describe('handleSettingsButton (Start Embed 取り込み結線)', () => {
     await handleSettingsButton(
       interaction as unknown as Parameters<typeof handleSettingsButton>[0],
       session,
-      configPath,
+      dir,
       logger,
     );
 
@@ -494,7 +530,7 @@ describe('handleSettingsButton (Start Embed 取り込み結線)', () => {
     await handleSettingsButton(
       interaction as unknown as Parameters<typeof handleSettingsButton>[0],
       undefined,
-      configPath,
+      dir,
       logger,
     );
 

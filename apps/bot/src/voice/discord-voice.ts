@@ -120,7 +120,7 @@ export async function setupVoiceFeature(
   config: BotConfig,
   logger: Logger,
   sessions: VoiceSessionRegistry,
-  configPath: string,
+  configDir: string,
 ): Promise<void> {
   const channel = await client.channels.fetch(config.voiceChannelId);
   if (channel?.type !== ChannelType.GuildVoice) {
@@ -186,10 +186,11 @@ export async function setupVoiceFeature(
   // (発火時にはセッション構築済み)。起動時に config.autoStart.time で武装する。
   const autoStartScheduler = new AutoStartScheduler({
     logger,
-    onFire: () => runAutoStart(voiceSession, configPath, logger),
+    onFire: () => runAutoStart(voiceSession, configDir, logger),
   });
 
-  // ▶開始ボタン等から参照できるよう、ギルド単位でセッションを登録する。
+  // ▶開始ボタン等から参照できるよう、VC 単位でセッションを登録する
+  // (キーは voiceChannelId。VC のテキストチャットで発生する interaction/message は channelId で解決)。
   const voiceSession: VoiceSession = {
     config,
     timer: session.timer,
@@ -198,7 +199,7 @@ export async function setupVoiceFeature(
     soundPlayer,
     autoStartScheduler,
   };
-  sessions.set(config.guildId, voiceSession);
+  sessions.set(config.voiceChannelId, voiceSession);
   autoStartScheduler.schedule(config.autoStart.time);
 
   // 起動時点の人間数を反映 (既に人がいれば入室する)。

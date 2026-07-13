@@ -5,8 +5,8 @@ import type { BotConfig, TimerSnapshot } from '@co-working-call/shared';
 import type { VoiceSession } from '../voice/session-registry.js';
 import { handleStartButton, isExecutorInTargetVc } from './start-button.js';
 
-vi.mock('../config/index.js', () => ({ loadConfig: vi.fn() }));
-import { loadConfig } from '../config/index.js';
+vi.mock('../config/index.js', () => ({ loadVcConfig: vi.fn() }));
+import { loadVcConfig } from '../config/index.js';
 
 const logger = {
   error: vi.fn(),
@@ -103,7 +103,7 @@ describe('isExecutorInTargetVc', () => {
 
 describe('handleStartButton', () => {
   beforeEach(() => {
-    vi.mocked(loadConfig).mockResolvedValue({
+    vi.mocked(loadVcConfig).mockResolvedValue({
       status: 'ok',
       config: {
         default: DEFAULT_TIMER,
@@ -194,7 +194,7 @@ describe('handleStartButton', () => {
     const { session, setVolumes } = makeSession();
     await handleStartButton(interaction, session, 'cfg.json', logger);
 
-    // loadConfig モックの volumes (workEnd:-10, finish:5) がそのまま反映される。
+    // loadVcConfig モックの volumes (workEnd:-10, finish:5) がそのまま反映される。
     expect(setVolumes).toHaveBeenCalledWith({
       workEnd: -10,
       breakEnd: 0,

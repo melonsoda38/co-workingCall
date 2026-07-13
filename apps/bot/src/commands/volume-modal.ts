@@ -1,24 +1,17 @@
 import {
   ButtonInteraction,
   LabelBuilder,
-  MessageFlags,
   ModalBuilder,
   ModalSubmitInteraction,
   TextInputBuilder,
   TextInputStyle,
 } from 'discord.js';
 import type { Logger } from 'pino';
-import type { BotConfig, VolumeConfig } from '@co-working-call/shared';
+import type { VolumeConfig } from '@co-working-call/shared';
 import { z } from 'zod';
-import { DEFAULT_VOLUME_CONFIG, saveConfig } from '../config/index.js';
+import { DEFAULT_VOLUME_CONFIG } from '../config/index.js';
 import type { VoiceSession } from '../voice/session-registry.js';
-import { scheduleEphemeralAutoDelete } from './ephemeral.js';
-import {
-  loadOkConfigOrReplySetup,
-  repostStartEmbedBestEffort,
-  requireConfigAdminForButton,
-  respondError,
-} from './interaction-helpers.js';
+import { requireConfigAdminForButton, runConfigModalSubmit } from './interaction-helpers.js';
 
 export const VOLUME_MODAL_ID = 'pomo_volume_modal';
 export const WORK_END_VOL_ID = 'vol_work_end';
@@ -110,12 +103,12 @@ export function parseVolumeModalInput(raw: {
 export async function handleVolumeButton(
   interaction: ButtonInteraction,
   session: VoiceSession | undefined,
-  configPath: string,
+  configDir: string,
   logger: Logger,
 ): Promise<void> {
   try {
     // 認可は設定ボタンと同じ config ベースの許可ロール方式 (config 未確定は pomo-admin フォールバック)。
-    const ctx = await requireConfigAdminForButton({ interaction, configPath, logger });
+    const ctx = await requireConfigAdminForButton({ interaction, configDir, logger });
     if (!ctx) {
       return;
     }
@@ -137,43 +130,29 @@ export async function handleVolumeButton(
 export async function handleVolumeModalSubmit(
   interaction: ModalSubmitInteraction,
   session: VoiceSession | undefined,
-  configPath: string,
+  configDir: string,
   logger: Logger,
 ): Promise<void> {
-  try {
-    const result = parseVolumeModalInput({
-      workEnd: interaction.fields.getTextInputValue(WORK_END_VOL_ID),
-      breakEnd: interaction.fields.getTextInputValue(BREAK_END_VOL_ID),
-      finalStart: interaction.fields.getTextInputValue(FINAL_START_VOL_ID),
-      countdownWarning: interaction.fields.getTextInputValue(COUNTDOWN_VOL_ID),
-      finish: interaction.fields.getTextInputValue(FINISH_VOL_ID),
-    });
-    if (!result.ok) {
-      await interaction.reply({
-        content: result.errors.join('\n'),
-        flags: MessageFlags.Ephemeral,
+  await runConfigModalSubmit({
+    interaction,
+    session,
+    configDir,
+    logger,
+    parse: () => {
+      const r = parseVolumeModalInput({
+        workEnd: interaction.fields.getTextInputValue(WORK_END_VOL_ID),
+        breakEnd: interaction.fields.getTextInputValue(BREAK_END_VOL_ID),
+        finalStart: interaction.fields.getTextInputValue(FINAL_START_VOL_ID),
+        countdownWarning: interaction.fields.getTextInputValue(COUNTDOWN_VOL_ID),
+        finish: interaction.fields.getTextInputValue(FINISH_VOL_ID),
       });
-      return;
-    }
-
-    const config = await loadOkConfigOrReplySetup(interaction, configPath);
-    if (!config) {
-      return;
-    }
-
-    const updated: BotConfig = { ...config, volumes: result.volumes };
-    await saveConfig(configPath, updated);
-    await interaction.reply({
-      content: '音量設定を保存しました ✅（次のタイマー開始から反映されます）',
-      flags: MessageFlags.Ephemeral,
-    });
-    logger.info({ volumes: updated.volumes }, '音量モーダルで config を更新しました');
-
-    await repostStartEmbedBestEffort(session, updated, logger);
-  } catch (err) {
-    logger.error({ err }, '音量モーダル処理に失敗しました');
-    await respondError(interaction, '音量設定の保存に失敗しました。ログを確認してください', logger);
-  } finally {
-    scheduleEphemeralAutoDelete(interaction, logger);
-  }
+      return r.ok ? { ok: true, value: r } : r;
+    },
+    buildUpdated: (config, value) => ({ ...config, volumes: value.volumes }),
+    successMessage: '音量設定を保存しました ✅（次のタイマー開始から反映されます）',
+    errorMessage: '音量設定の保存に失敗しました。ログを確認してください',
+    errorLogMessage: '音量モーダル処理に失敗しました',
+    logMessage: '音量モーダルで config を更新しました',
+    logContext: (updated) => ({ volumes: updated.volumes }),
+  });
 }

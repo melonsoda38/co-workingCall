@@ -58,4 +58,14 @@ describe('missingBotPermissions', () => {
     const perms = new PermissionsBitField();
     expect(missingBotPermissions(perms).length).toBe(REQUIRED_BOT_PERMISSIONS.length);
   });
+
+  it('AttachFiles は必須で、欠けると検知される (タイマー Embed PNG 添付に必要)', () => {
+    expect(REQUIRED_BOT_PERMISSIONS).toContain(PermissionFlagsBits.AttachFiles);
+    // AttachFiles 以外を全て持つ状態を作り、AttachFiles だけが欠落として返ることを確認。
+    const allButAttach = REQUIRED_BOT_PERMISSIONS.filter(
+      (bit) => bit !== PermissionFlagsBits.AttachFiles,
+    );
+    const perms = new PermissionsBitField(allButAttach);
+    expect(missingBotPermissions(perms)).toEqual(['AttachFiles']);
+  });
 });

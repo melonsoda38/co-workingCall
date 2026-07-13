@@ -1,4 +1,4 @@
-import { loadConfig } from './config/index.js';
+import { loadAllGuildConfigs, resolveConfigDir } from './config/index.js';
 import { startBot } from './discord/client.js';
 import { parseEnv, type Env } from './env.js';
 import { loadEnvForApp, type LoadedEnvInfo } from './load-env.js';
@@ -64,27 +64,20 @@ async function main(): Promise<void> {
     return;
   }
 
-  // config.json を検証。無効でも落とさず待機状態にする (spec.md)。
-  const configResult = await loadConfig(env.CONFIG_PATH);
-  switch (configResult.status) {
-    case 'ok':
-      logger.info(
-        {
-          guildId: configResult.config.guildId,
-          voiceChannelId: configResult.config.voiceChannelId,
-        },
-        'config.json を読み込みました',
-      );
-      break;
-    case 'missing':
-      logger.info('config.json が無いため待機状態です (/pomo init で初期化してください)');
-      break;
-    case 'invalid':
-      logger.warn(
-        { issues: configResult.issues },
-        'config.json が不正なため待機状態です (/pomo init で復旧してください)',
-      );
-      break;
+  // per-guild config を検証。無効でも落とさず待機状態にする (spec.md)。
+  // startBot 内で旧 config.json は既に per-guild へ移行済み。
+  const configDir = resolveConfigDir(env.CONFIG_PATH);
+  const all = await loadAllGuildConfigs(configDir, logger);
+  if (all.length === 0) {
+    logger.info('有効な config が無いため待機状態です (/pomo init で初期化してください)');
+  } else {
+    logger.info(
+      {
+        sessions: all.length,
+        guilds: [...new Set(all.map((a) => a.guildId))].length,
+      },
+      'per-guild config を読み込みました',
+    );
   }
 }
 

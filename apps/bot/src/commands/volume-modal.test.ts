@@ -1,10 +1,11 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ModalBuilder } from 'discord.js';
 import type { Logger } from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BotConfig } from '@co-working-call/shared';
+import { loadVcConfig, saveVcConfig } from '../config/index.js';
 import type { VoiceSession } from '../voice/session-registry.js';
 import {
   VOLUME_MODAL_ID,
@@ -20,6 +21,15 @@ import {
 } from './volume-modal.js';
 
 const ZERO = { workEnd: 0, breakEnd: 0, finalStart: 0, countdownWarning: 0, finish: 0 };
+
+/** per-guild ファイルから当該 VC の保存済み config を読み出す (テスト検証用)。 */
+async function readSavedConfig(dir: string): Promise<BotConfig> {
+  const r = await loadVcConfig(dir, '1001', 'vc');
+  if (r.status !== 'ok') {
+    throw new Error(`config not ok: ${r.status}`);
+  }
+  return r.config;
+}
 
 describe('parseVolumeModalInput', () => {
   it('有効な dB 入力をそのまま返す', () => {
@@ -105,10 +115,9 @@ describe('handleVolumeModalSubmit', () => {
   } as unknown as Logger;
 
   let dir: string;
-  let configPath: string;
   const initialConfig: BotConfig = {
     default: { workSec: 1500, breakSec: 300, sets: 4, finalBreakSec: 900 },
-    guildId: 'g',
+    guildId: '1001',
     voiceChannelId: 'vc',
     adminRoleName: 'pomo-admin',
     adminRoleNames: [],
@@ -118,8 +127,7 @@ describe('handleVolumeModalSubmit', () => {
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'cowork-volume-'));
-    configPath = join(dir, 'config.json');
-    await writeFile(configPath, JSON.stringify(initialConfig), 'utf-8');
+    await saveVcConfig(dir, initialConfig);
     vi.clearAllMocks();
   });
   afterEach(async () => {
@@ -131,15 +139,22 @@ describe('handleVolumeModalSubmit', () => {
     flags: number;
   }
 
-  function makeInteraction(values: Record<string, string>) {
+  function makeInteraction(values: Record<string, string>, memberRoles: string[] = ['pomo-admin']) {
     const reply = vi.fn<(options: ReplyOptions) => Promise<void>>(() => Promise.resolve());
     const deleteReply = vi.fn<() => Promise<void>>(() => Promise.resolve());
+    const fetch = vi.fn(() =>
+      Promise.resolve({ roles: { cache: memberRoles.map((name) => ({ name })) } }),
+    );
     return {
       fields: { getTextInputValue: (id: string): string => values[id] ?? '' },
       reply,
       deleteReply,
       deferred: false,
       replied: false,
+      guildId: '1001',
+      channelId: 'vc',
+      user: { id: 'user-1' },
+      guild: { id: '1001', members: { fetch } },
     };
   }
 
@@ -162,7 +177,7 @@ describe('handleVolumeModalSubmit', () => {
     await handleVolumeModalSubmit(
       interaction as unknown as Parameters<typeof handleVolumeModalSubmit>[0],
       session,
-      configPath,
+      dir,
       logger,
     );
 
@@ -173,7 +188,7 @@ describe('handleVolumeModalSubmit', () => {
       countdownWarning: -3,
       finish: 10,
     };
-    const saved = JSON.parse(await readFile(configPath, 'utf-8')) as BotConfig;
+    const saved = await readSavedConfig(dir);
     expect(saved.volumes).toEqual(expectedVolumes);
     expect(repostStartEmbed).toHaveBeenCalledTimes(1);
     expect(repostStartEmbed.mock.calls[0]?.[0]?.volumes).toEqual(expectedVolumes);
@@ -194,14 +209,14 @@ describe('handleVolumeModalSubmit', () => {
     await handleVolumeModalSubmit(
       interaction as unknown as Parameters<typeof handleVolumeModalSubmit>[0],
       session,
-      configPath,
+      dir,
       logger,
     );
 
     const replyCall = interaction.reply.mock.calls[0]?.[0];
     expect(replyCall?.content).toContain('休憩開始は-50〜50の整数(dB)で入力してください');
     expect(repostStartEmbed).not.toHaveBeenCalled();
-    const saved = JSON.parse(await readFile(configPath, 'utf-8')) as BotConfig;
+    const saved = await readSavedConfig(dir);
     expect(saved.volumes).toEqual(ZERO);
   });
 
@@ -220,11 +235,38 @@ describe('handleVolumeModalSubmit', () => {
       handleVolumeModalSubmit(
         interaction as unknown as Parameters<typeof handleVolumeModalSubmit>[0],
         session,
-        configPath,
+        dir,
         logger,
       ),
     ).resolves.toBeUndefined();
     expect(logger.warn).toHaveBeenCalled();
+  });
+
+  it('非管理者の送信は権限再チェックで弾かれ保存しない (defense-in-depth)', async () => {
+    const interaction = makeInteraction(
+      {
+        [WORK_END_VOL_ID]: '-10',
+        [BREAK_END_VOL_ID]: '0',
+        [FINAL_START_VOL_ID]: '5',
+        [COUNTDOWN_VOL_ID]: '-3',
+        [FINISH_VOL_ID]: '10',
+      },
+      ['everyone'],
+    );
+    const { session, repostStartEmbed } = makeSession();
+
+    await handleVolumeModalSubmit(
+      interaction as unknown as Parameters<typeof handleVolumeModalSubmit>[0],
+      session,
+      dir,
+      logger,
+    );
+
+    const replyContent = interaction.reply.mock.calls[0]?.[0]?.content;
+    expect(replyContent).toContain('ロールが必要');
+    expect(repostStartEmbed).not.toHaveBeenCalled();
+    const saved = await readSavedConfig(dir);
+    expect(saved.volumes).toEqual(ZERO);
   });
 });
 
@@ -237,10 +279,9 @@ describe('handleVolumeButton', () => {
   } as unknown as Logger;
 
   let dir: string;
-  let configPath: string;
   const initialConfig: BotConfig = {
     default: { workSec: 1500, breakSec: 300, sets: 4, finalBreakSec: 900 },
-    guildId: 'g',
+    guildId: '1001',
     voiceChannelId: 'vc',
     adminRoleName: 'pomo-admin',
     adminRoleNames: [],
@@ -250,8 +291,7 @@ describe('handleVolumeButton', () => {
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'cowork-volume-btn-'));
-    configPath = join(dir, 'config.json');
-    await writeFile(configPath, JSON.stringify(initialConfig), 'utf-8');
+    await saveVcConfig(dir, initialConfig);
     vi.clearAllMocks();
   });
   afterEach(async () => {
@@ -267,7 +307,9 @@ describe('handleVolumeButton', () => {
     return {
       message: { id: 'start-embed-msg-id' },
       user: { id: 'user-1' },
-      guild: { id: 'g', members: { fetch } },
+      guild: { id: '1001', members: { fetch } },
+      guildId: '1001',
+      channelId: 'vc',
       showModal,
       reply,
     };
@@ -286,7 +328,7 @@ describe('handleVolumeButton', () => {
     await handleVolumeButton(
       interaction as unknown as Parameters<typeof handleVolumeButton>[0],
       session,
-      configPath,
+      dir,
       logger,
     );
 
@@ -301,7 +343,7 @@ describe('handleVolumeButton', () => {
     await handleVolumeButton(
       interaction as unknown as Parameters<typeof handleVolumeButton>[0],
       session,
-      configPath,
+      dir,
       logger,
     );
 

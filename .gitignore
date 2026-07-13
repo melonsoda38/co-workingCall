@@ -14,9 +14,15 @@ dist/
 !.env.staging.example
 
 # ランタイム生成設定 (/pomo init で生成される)
-# config.json (本番 guild) / config.staging.json (テスト guild) はそれぞれ guildId を持つ。
+# guild ごとの設定は <config名>.guilds/<guildId>.json に保存される (複数サーバー対応)。
+# 本番は config.guilds/、テストは config.staging.guilds/ に分離される。
+# 旧単一 config.json / config.staging.json は起動時に自動移行され .migrated へ退避。
 apps/bot/config.json
 apps/bot/config.staging.json
+apps/bot/config.json.migrated
+apps/bot/config.staging.json.migrated
+apps/bot/config.guilds/
+apps/bot/config.staging.guilds/
 
 # pidfile (多重起動防止。SIGKILL 等で残った場合は次回起動時に stale 判定で回収される)
 bot.pid

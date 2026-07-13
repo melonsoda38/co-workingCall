@@ -26,10 +26,10 @@ import {
 } from './interaction-helpers.js';
 
 vi.mock('../config/index.js', () => ({
-  loadConfig: vi.fn(),
+  loadVcConfig: vi.fn(),
   DEFAULT_ADMIN_ROLE_NAME: 'pomo-admin',
 }));
-import { loadConfig } from '../config/index.js';
+import { loadVcConfig } from '../config/index.js';
 
 const logger = {
   error: vi.fn(),
@@ -163,6 +163,8 @@ describe('requireConfigAdminForButton', () => {
     const reply = vi.fn(() => Promise.resolve());
     const interaction = {
       guild: makeGuild(roleNames),
+      guildId: 'guild-1',
+      channelId: 'vc-1',
       user: { id: 'user-1' },
       reply,
       deferred: false,
@@ -172,42 +174,50 @@ describe('requireConfigAdminForButton', () => {
   }
 
   it('config が ok なら config を含めて返す', async () => {
-    vi.mocked(loadConfig).mockResolvedValue({ status: 'ok', config: makeConfig() });
+    vi.mocked(loadVcConfig).mockResolvedValue({ status: 'ok', config: makeConfig() });
     const { interaction, reply } = makeInteraction(['pomo-admin']);
-    const result = await requireConfigAdminForButton({ interaction, configPath: 'cfg', logger });
+    const result = await requireConfigAdminForButton({ interaction, configDir: 'cfg', logger });
     expect(result?.config).toEqual(makeConfig());
     expect(reply).not.toHaveBeenCalled();
   });
 
   it('config 未確定でも pomo-admin ロールなら通す (config=undefined)', async () => {
-    vi.mocked(loadConfig).mockResolvedValue({ status: 'missing' });
+    vi.mocked(loadVcConfig).mockResolvedValue({ status: 'missing' });
     const { interaction } = makeInteraction(['pomo-admin']);
-    const result = await requireConfigAdminForButton({ interaction, configPath: 'cfg', logger });
+    const result = await requireConfigAdminForButton({ interaction, configDir: 'cfg', logger });
     expect(result).not.toBeNull();
     expect(result?.config).toBeUndefined();
   });
 
   it('許可ロールを持たなければ reply して弾く', async () => {
-    vi.mocked(loadConfig).mockResolvedValue({ status: 'ok', config: makeConfig() });
+    vi.mocked(loadVcConfig).mockResolvedValue({ status: 'ok', config: makeConfig() });
     const { interaction, reply } = makeInteraction(['everyone']);
-    expect(await requireConfigAdminForButton({ interaction, configPath: 'cfg', logger })).toBeNull();
+    expect(await requireConfigAdminForButton({ interaction, configDir: 'cfg', logger })).toBeNull();
     expect(reply).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('loadOkConfigOrReplySetup', () => {
   it('ok なら config を返し reply しない', async () => {
-    vi.mocked(loadConfig).mockResolvedValue({ status: 'ok', config: makeConfig() });
+    vi.mocked(loadVcConfig).mockResolvedValue({ status: 'ok', config: makeConfig() });
     const reply = vi.fn(() => Promise.resolve());
-    const interaction = { reply } as unknown as ModalSubmitInteraction;
+    const interaction = {
+      reply,
+      guildId: 'guild-1',
+      channelId: 'vc-1',
+    } as unknown as ModalSubmitInteraction;
     await expect(loadOkConfigOrReplySetup(interaction, 'cfg')).resolves.toEqual(makeConfig());
     expect(reply).not.toHaveBeenCalled();
   });
 
   it('ok でなければ init を促して null を返す', async () => {
-    vi.mocked(loadConfig).mockResolvedValue({ status: 'missing' });
+    vi.mocked(loadVcConfig).mockResolvedValue({ status: 'missing' });
     const reply = vi.fn<(options: unknown) => Promise<void>>(() => Promise.resolve());
-    const interaction = { reply } as unknown as ModalSubmitInteraction;
+    const interaction = {
+      reply,
+      guildId: 'guild-1',
+      channelId: 'vc-1',
+    } as unknown as ModalSubmitInteraction;
     expect(await loadOkConfigOrReplySetup(interaction, 'cfg')).toBeNull();
     expect(reply.mock.calls[0]?.[0]).toMatchObject({ content: SETUP_REQUIRED_INIT });
   });
